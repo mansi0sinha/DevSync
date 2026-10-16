@@ -1,4 +1,5 @@
-import { useState } from "react";
+
+import { useEffect, useState } from "react";
 import {
   UserRound,
   Building2,
@@ -7,10 +8,35 @@ import {
   Palette,
   Save,
   Check,
+  Sun,
+  Moon,
+  Monitor,
+  RotateCcw,
 } from "lucide-react";
 import Button from "../components/ui/Button";
 
-const settingsSections = [
+const DEFAULT_PROFILE = {
+  name: "Your Name",
+  username: "developer",
+  email: "you@example.com",
+  bio: "Building software and solving problems.",
+};
+
+const DEFAULT_WORKSPACE = {
+  name: "My Workspace",
+  description: "A space for engineering collaboration.",
+};
+
+const DEFAULT_NOTIFICATIONS = {
+  discussions: true,
+  taskUpdates: true,
+  decisions: true,
+  weeklySummary: false,
+};
+
+const DEFAULT_THEME = "light";
+
+const sections = [
   { id: "profile", label: "Profile", icon: UserRound },
   { id: "workspace", label: "Workspace", icon: Building2 },
   { id: "notifications", label: "Notifications", icon: Bell },
@@ -18,39 +44,89 @@ const settingsSections = [
   { id: "security", label: "Security", icon: ShieldCheck },
 ];
 
+function readStored(key, fallback) {
+  try {
+    const value = localStorage.getItem(key);
+    return value ? { ...fallback, ...JSON.parse(value) } : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function readTheme() {
+  try {
+    return localStorage.getItem("devsync-theme") || DEFAULT_THEME;
+  } catch {
+    return DEFAULT_THEME;
+  }
+}
+
+function applyTheme(theme) {
+  const isDark =
+    theme === "dark" ||
+    (theme === "system" &&
+      window.matchMedia("(prefers-color-scheme: dark)").matches);
+
+  document.documentElement.classList.toggle("dark", isDark);
+
+  try {
+    localStorage.setItem("devsync-theme", theme);
+  } catch {
+    // The theme still works if browser storage is unavailable.
+  }
+}
+
 function Settings() {
   const [activeSection, setActiveSection] = useState("profile");
   const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState("");
+  const [theme, setTheme] = useState(readTheme);
 
-  const [profile, setProfile] = useState({
-    name: "Your Name",
-    username: "developer",
-    email: "you@example.com",
-    bio: "Building software and solving problems.",
-  });
+  const [profile, setProfile] = useState(() =>
+    readStored("devsync-profile", DEFAULT_PROFILE)
+  );
 
-  const [workspace, setWorkspace] = useState({
-    name: "My Workspace",
-    description: "A space for engineering collaboration.",
-  });
+  const [workspace, setWorkspace] = useState(() =>
+    readStored("devsync-workspace", DEFAULT_WORKSPACE)
+  );
 
-  const [notifications, setNotifications] = useState({
-    discussions: true,
-    taskUpdates: true,
-    decisions: true,
-    weeklySummary: false,
-  });
+  const [notifications, setNotifications] = useState(() =>
+    readStored("devsync-notifications", DEFAULT_NOTIFICATIONS)
+  );
+
+  useEffect(() => {
+    applyTheme(theme);
+  }, [theme]);
+
+  useEffect(() => {
+    if (theme !== "system") return;
+
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const update = () => {
+      document.documentElement.classList.toggle("dark", media.matches);
+    };
+
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, [theme]);
+
+  function markChanged() {
+    setSaved(false);
+    setSaveError("");
+  }
 
   function updateProfile(event) {
     const { name, value } = event.target;
+
     setProfile((current) => ({ ...current, [name]: value }));
-    setSaved(false);
+    markChanged();
   }
 
   function updateWorkspace(event) {
     const { name, value } = event.target;
+
     setWorkspace((current) => ({ ...current, [name]: value }));
-    setSaved(false);
+    markChanged();
   }
 
   function toggleNotification(key) {
@@ -58,17 +134,98 @@ function Settings() {
       ...current,
       [key]: !current[key],
     }));
+    markChanged();
+  }
+
+  function changeTheme(nextTheme) {
+    setTheme(nextTheme);
+    applyTheme(nextTheme);
     setSaved(false);
+    setSaveError("");
   }
 
   function handleSave(event) {
     event.preventDefault();
-    setSaved(true);
-    window.setTimeout(() => setSaved(false), 2500);
+    setSaveError("");
+
+    if (!profile.name.trim()) {
+      setSaveError("Please enter your full name.");
+      setActiveSection("profile");
+      return;
+    }
+
+    if (!/^[a-zA-Z0-9_-]{3,25}$/.test(profile.username)) {
+      setSaveError(
+        "Username must be 3–25 characters using letters, numbers, underscores, or hyphens."
+      );
+      setActiveSection("profile");
+      return;
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(profile.email)) {
+      setSaveError("Please enter a valid email address.");
+      setActiveSection("profile");
+      return;
+    }
+
+    if (!workspace.name.trim()) {
+      setSaveError("Please enter a workspace name.");
+      setActiveSection("workspace");
+      return;
+    }
+
+    try {
+      localStorage.setItem("devsync-profile", JSON.stringify(profile));
+      localStorage.setItem("devsync-workspace", JSON.stringify(workspace));
+      localStorage.setItem(
+        "devsync-notifications",
+        JSON.stringify(notifications)
+      );
+      localStorage.setItem("devsync-theme", theme);
+
+      setSaved(true);
+    } catch {
+      setSaveError(
+        "Your browser could not save these settings. Check your storage permissions."
+      );
+      setSaved(false);
+    }
+  }
+
+  function resetSettings() {
+    setProfile({ ...DEFAULT_PROFILE });
+    setWorkspace({ ...DEFAULT_WORKSPACE });
+    setNotifications({ ...DEFAULT_NOTIFICATIONS });
+    setTheme(DEFAULT_THEME);
+    setSaved(false);
+    setSaveError("");
   }
 
   const fieldClass =
     "mt-2 w-full rounded-lg border border-line bg-bg px-3 py-2.5 text-sm text-text outline-none placeholder:text-muted focus:border-acc";
+
+  const notificationOptions = [
+    {
+      key: "discussions",
+      title: "Discussion messages",
+      description: "When someone posts in a team discussion.",
+    },
+    {
+      key: "taskUpdates",
+      title: "Task updates",
+      description: "When tasks are created or their status changes.",
+    },
+    {
+      key: "decisions",
+      title: "Decision updates",
+      description: "When a team decision is recorded or updated.",
+    },
+    {
+      key: "weeklySummary",
+      title: "Weekly summary",
+      description: "A summary of activity across your workspace.",
+    },
+  ];
 
   function renderSection() {
     switch (activeSection) {
@@ -86,9 +243,13 @@ function Settings() {
               <div className="flex h-14 w-14 items-center justify-center rounded-full border border-line bg-hover text-lg font-semibold text-text">
                 {profile.name.trim().charAt(0).toUpperCase() || "U"}
               </div>
-              <div>
-                <p className="font-semibold text-text">{profile.name || "Your Name"}</p>
-                <p className="mt-1 text-sm text-muted">@{profile.username || "username"}</p>
+              <div className="min-w-0">
+                <p className="truncate font-semibold text-text">
+                  {profile.name || "Your Name"}
+                </p>
+                <p className="mt-1 text-sm text-muted">
+                  @{profile.username || "username"}
+                </p>
                 <p className="mt-1 text-xs text-muted">Profile preview</p>
               </div>
             </div>
@@ -100,6 +261,7 @@ function Settings() {
                   name="name"
                   value={profile.name}
                   onChange={updateProfile}
+                  maxLength={80}
                   className={fieldClass}
                   placeholder="Enter your name"
                 />
@@ -111,6 +273,7 @@ function Settings() {
                   name="username"
                   value={profile.username}
                   onChange={updateProfile}
+                  maxLength={25}
                   className={fieldClass}
                   placeholder="Choose a username"
                 />
@@ -137,7 +300,7 @@ function Settings() {
                   rows={3}
                   maxLength={160}
                   className={`${fieldClass} resize-y`}
-                  placeholder="Tell your team a little about yourself"
+                  placeholder="Tell your team about yourself"
                 />
                 <span className="mt-1 block text-right text-xs font-normal text-muted">
                   {profile.bio.length}/160
@@ -153,7 +316,7 @@ function Settings() {
             <div className="mb-6">
               <h2 className="text-lg font-semibold text-text">Workspace</h2>
               <p className="mt-1 text-sm text-muted">
-                Configure the shared space where your team works.
+                Configure your shared engineering workspace.
               </p>
             </div>
 
@@ -164,6 +327,7 @@ function Settings() {
                   name="name"
                   value={workspace.name}
                   onChange={updateWorkspace}
+                  maxLength={80}
                   className={fieldClass}
                   placeholder="My Workspace"
                 />
@@ -176,19 +340,20 @@ function Settings() {
                   value={workspace.description}
                   onChange={updateWorkspace}
                   rows={3}
+                  maxLength={300}
                   className={`${fieldClass} resize-y`}
                   placeholder="What is this workspace for?"
                 />
               </label>
 
               <div className="rounded-lg border border-line bg-bg p-4">
-                <p className="text-sm font-semibold text-text">Workspace plan</p>
-                <p className="mt-1 text-sm text-muted">
-                  Free plan · Local demo
+                <p className="text-sm font-semibold text-text">
+                  Workspace plan
                 </p>
+                <p className="mt-1 text-sm text-muted">Free plan · Demo</p>
                 <p className="mt-3 text-xs leading-5 text-muted">
-                  Workspace details are currently stored in this page's state.
-                  Persistent team settings will require a backend.
+                  Workspace preferences are saved in this browser. Team
+                  membership and billing require a backend.
                 </p>
               </div>
             </div>
@@ -199,45 +364,29 @@ function Settings() {
         return (
           <>
             <div className="mb-6">
-              <h2 className="text-lg font-semibold text-text">Notifications</h2>
+              <h2 className="text-lg font-semibold text-text">
+                Notifications
+              </h2>
               <p className="mt-1 text-sm text-muted">
-                Choose which workspace updates you want to receive.
+                Choose which updates you want to enable in your preferences.
               </p>
             </div>
 
             <div className="divide-y divide-line">
-              {[
-                {
-                  key: "discussions",
-                  title: "Discussion messages",
-                  description: "When someone posts in a team discussion.",
-                },
-                {
-                  key: "taskUpdates",
-                  title: "Task updates",
-                  description: "When tasks are created or their status changes.",
-                },
-                {
-                  key: "decisions",
-                  title: "Decision updates",
-                  description: "When a team decision is recorded or updated.",
-                },
-                {
-                  key: "weeklySummary",
-                  title: "Weekly summary",
-                  description: "A summary of activity across your workspace.",
-                },
-              ].map((item) => (
+              {notificationOptions.map((item) => (
                 <div
                   key={item.key}
                   className="flex items-center justify-between gap-4 py-4"
                 >
                   <div>
-                    <p className="text-sm font-medium text-text">{item.title}</p>
+                    <p className="text-sm font-medium text-text">
+                      {item.title}
+                    </p>
                     <p className="mt-1 text-xs leading-5 text-muted">
                       {item.description}
                     </p>
                   </div>
+
                   <button
                     type="button"
                     role="switch"
@@ -259,6 +408,11 @@ function Settings() {
                 </div>
               ))}
             </div>
+
+            <p className="mt-4 text-xs text-muted">
+              These are saved preferences only. Email and push delivery will
+              be connected when notification services are added.
+            </p>
           </>
         );
 
@@ -268,27 +422,80 @@ function Settings() {
             <div className="mb-6">
               <h2 className="text-lg font-semibold text-text">Appearance</h2>
               <p className="mt-1 text-sm text-muted">
-                Customize how DevSync looks on your screen.
+                Choose how DevSync looks on this device.
               </p>
             </div>
 
-            <div className="rounded-xl border border-line bg-bg p-4">
-              <div className="flex items-start gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-line bg-hover">
-                  <Palette size={19} className="text-muted" />
-                </div>
-                <div className="flex-1">
-                  <p className="text-sm font-semibold text-text">Color theme</p>
-                  <p className="mt-1 text-sm text-muted">
-                    Switch between light and dark mode using the theme button in the top bar.
-                  </p>
-                </div>
-              </div>
+            <div className="grid gap-3 sm:grid-cols-3">
+              {[
+                {
+                  id: "light",
+                  label: "Light",
+                  description: "Bright workspace",
+                  icon: Sun,
+                },
+                {
+                  id: "dark",
+                  label: "Dark",
+                  description: "Low-light workspace",
+                  icon: Moon,
+                },
+                {
+                  id: "system",
+                  label: "System",
+                  description: "Follow your device",
+                  icon: Monitor,
+                },
+              ].map((option) => {
+                const Icon = option.icon;
+                const selected = theme === option.id;
+
+                return (
+                  <button
+                    key={option.id}
+                    type="button"
+                    aria-pressed={selected}
+                    onClick={() => changeTheme(option.id)}
+                    className={`rounded-xl border p-4 text-left ${
+                      selected
+                        ? "border-acc bg-accSoft"
+                        : "border-line bg-bg hover:bg-hover"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <Icon size={20} className="text-text" />
+                      {selected && <Check size={17} className="text-acc" />}
+                    </div>
+                    <p className="mt-4 text-sm font-semibold text-text">
+                      {option.label}
+                    </p>
+                    <p className="mt-1 text-xs text-muted">
+                      {option.description}
+                    </p>
+                  </button>
+                );
+              })}
             </div>
 
-            <p className="mt-4 text-xs leading-5 text-muted">
-              Theme selection currently applies to the running app. Saving your preference between sessions can be added later.
-            </p>
+            <div className="mt-5 rounded-xl border border-line bg-bg p-4">
+              <p className="text-sm font-semibold text-text">
+                Theme preview
+              </p>
+              <div className="mt-3 flex items-center gap-3 rounded-lg border border-line bg-surface p-3">
+                <div className="h-8 w-1 rounded-full bg-acc" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-text">
+                    Engineering workspace
+                  </p>
+                  <p className="mt-1 text-xs text-muted">
+                    Your selected theme applies immediately.
+                  </p>
+                </div>
+                <span className="rounded-md bg-accSoft px-2 py-1 text-xs font-medium text-acc">
+                  Active
+                </span>
+              </div>
+            </div>
           </>
         );
 
@@ -298,21 +505,30 @@ function Settings() {
             <div className="mb-6">
               <h2 className="text-lg font-semibold text-text">Security</h2>
               <p className="mt-1 text-sm text-muted">
-                Account security options for your workspace.
+                Account security controls will be connected with authentication.
               </p>
             </div>
 
             <div className="space-y-4">
               <div className="rounded-xl border border-line bg-bg p-4">
-                <p className="text-sm font-semibold text-text">Authentication</p>
-                <p className="mt-1 text-sm text-muted">
-                  Sign-in and session management will be configured when authentication is added.
+                <p className="text-sm font-semibold text-text">
+                  Authentication
                 </p>
-              </div>
-              <div className="rounded-xl border border-line bg-bg p-4">
-                <p className="text-sm font-semibold text-text">Active sessions</p>
                 <p className="mt-1 text-sm text-muted">
-                  Session information is not available in this frontend-only demo.
+                  Login, password changes, and session protection are not
+                  available until the backend authentication system is built.
+                </p>
+                <span className="mt-3 inline-flex rounded-md border border-line px-2 py-1 text-xs text-muted">
+                  Not configured
+                </span>
+              </div>
+
+              <div className="rounded-xl border border-line bg-bg p-4">
+                <p className="text-sm font-semibold text-text">
+                  Active sessions
+                </p>
+                <p className="mt-1 text-sm text-muted">
+                  There are no server-managed sessions in this frontend demo.
                 </p>
               </div>
             </div>
@@ -340,7 +556,7 @@ function Settings() {
 
       <div className="grid items-start gap-6 lg:grid-cols-[220px_minmax(0,1fr)]">
         <nav className="rounded-xl border border-line bg-surface p-2">
-          {settingsSections.map((section) => {
+          {sections.map((section) => {
             const Icon = section.icon;
             const active = activeSection === section.id;
 
@@ -351,6 +567,7 @@ function Settings() {
                 onClick={() => {
                   setActiveSection(section.id);
                   setSaved(false);
+                  setSaveError("");
                 }}
                 className={`mb-1 flex min-h-10 w-full items-center gap-3 rounded-lg px-3 text-left text-sm ${
                   active
@@ -369,19 +586,40 @@ function Settings() {
           onSubmit={handleSave}
           className="overflow-hidden rounded-xl border border-line bg-surface"
         >
-          <div className="p-5 sm:p-7">
-            {renderSection()}
-          </div>
+          <div className="p-5 sm:p-7">{renderSection()}</div>
 
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line bg-bg px-5 py-4 sm:px-7">
-            <p className="text-xs text-muted">
-              Changes are local to this demo.
-            </p>
+            <div className="flex min-w-0 flex-1 items-center gap-2">
+              <p className="text-xs text-muted">
+                Saved locally in this browser.
+              </p>
+              {saved && (
+                <span className="flex items-center gap-1 text-xs font-medium text-acc">
+                  <Check size={14} /> Saved
+                </span>
+              )}
+              {saveError && (
+                <p role="alert" className="text-xs text-red-600">
+                  {saveError}
+                </p>
+              )}
+            </div>
 
-            <Button type="submit" size="md">
-              {saved ? <Check size={16} /> : <Save size={16} />}
-              {saved ? "Saved" : "Save changes"}
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                size="md"
+                onClick={resetSettings}
+              >
+                <RotateCcw size={15} />
+                Reset
+              </Button>
+              <Button type="submit" size="md">
+                <Save size={16} />
+                Save changes
+              </Button>
+            </div>
           </div>
         </form>
       </div>
