@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48" role="img" aria-label="DevSync">
+  <path d="M12 24 L24 12 L36 24 L24 36 Z" fill="#DB8B1F"/>
+  <path d="M4 24 L20 8 L36 24 L20 40 Z" fill="none" stroke="#0B7A6B" stroke-width="2.5" stroke-linejoin="round"/>
+  <path d="M12 24 L28 8 L44 24 L28 40 Z" fill="none" stroke="#1A1B19" stroke-width="2.5" stroke-linejoin="round"/>
+</svg>
