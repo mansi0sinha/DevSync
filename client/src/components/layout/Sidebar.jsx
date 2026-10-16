@@ -44,7 +44,7 @@ export default function Sidebar({
   return (
     <aside className="m-3 flex h-[calc(100vh-24px)] w-64 shrink-0 flex-col overflow-hidden rounded-xl border border-line bg-side">
       {/* Brand */}
-      <div className="flex h-[76px] shrink-0 items-center gap-3 border-b border-line px-5">
+      <div className="flex h-19 shrink-0 items-center gap-3 border-b border-line px-5">
         <img
           src={
             isDark

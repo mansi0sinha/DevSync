@@ -414,7 +414,7 @@ export default function Discussion() {
   }
 
   return (
-    <div className="mx-auto flex h-full min-h-[600px] w-full max-w-[1600px] flex-col gap-5 pb-2">
+    <div className="mx-auto flex h-full min-h-150 w-full max-w-[1600px] flex-col gap-5 pb-2">
       {/* Page heading */}
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
         <div>
@@ -554,7 +554,7 @@ export default function Discussion() {
         </aside>
 
         {/* Active conversation */}
-        <section className="flex min-h-[500px] min-w-0 flex-col">
+        <section className="flex min-h-125 min-w-0 flex-col">
           {activeThread ? (
             <>
               {/* Thread header */}

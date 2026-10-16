@@ -400,7 +400,7 @@ function Settings() {
                     <span
                       className={`absolute top-0.5 h-4 w-4 rounded-full ${
                         notifications[item.key]
-                          ? "left-[22px] bg-onAcc"
+                          ? "left-5.5 bg-onAcc"
                           : "left-0.5 bg-muted"
                       }`}
                     />
