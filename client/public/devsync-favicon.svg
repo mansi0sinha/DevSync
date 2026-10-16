@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" role="img" aria-label="DevSync">
+  <rect width="64" height="64" rx="14" fill="#1A1B19"/>
+  <g transform="translate(9.6 9.6) scale(0.8)">
+    <path d="M12 24 L24 12 L36 24 L24 36 Z" fill="#E3B15F"/>
+    <path d="M4 24 L20 8 L36 24 L20 40 Z" fill="none" stroke="#43C2AC" stroke-width="3.2" stroke-linejoin="round"/>
+    <path d="M12 24 L28 8 L44 24 L28 40 Z" fill="none" stroke="#E9EAE7" stroke-width="3.2" stroke-linejoin="round"/>
+  </g>
+</svg>
