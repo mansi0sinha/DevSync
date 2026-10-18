@@ -19,7 +19,7 @@ app.get("/", (req, res) => {
 app.get("/api/health", (req, res) => {
   res.json({
     success: true,
-    message: "DevSync server is healthy",
+    message: "DevSync server is healthy  ",
   });
 });
 
