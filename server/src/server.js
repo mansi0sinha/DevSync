@@ -4,6 +4,7 @@ const cors = require("cors");
 require("dotenv").config();
 
 const connectDB = require("./config/db");
+const taskRoutes = require("./routes/taskRoutes");
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -19,7 +20,7 @@ app.get("/", (req, res) => {
   });
 });
 
-// Health check route
+// Health check
 app.get("/api/health", (req, res) => {
   res.json({
     success: true,
@@ -27,9 +28,17 @@ app.get("/api/health", (req, res) => {
   });
 });
 
-// Connect to MongoDB, then start the server
-connectDB().then(() => {
-  app.listen(PORT, () => {
-    console.log(`DevSync API running at http://localhost:${PORT}`);
+// Task routes
+app.use("/api/tasks", taskRoutes);
+
+// Connect to MongoDB, then start server
+connectDB()
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(`DevSync API running at http://localhost:${PORT}`);
+    });
+  })
+  .catch((error) => {
+    console.error("Failed to start server:", error.message);
+    process.exit(1);
   });
-});
