@@ -5,6 +5,23 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>client</title>
+    
+<script>
+  (() => {
+    try {
+      const savedTheme = localStorage.getItem("devsync-theme");
+      const theme = savedTheme === "dark" ? "dark" : "light";
+
+      document.documentElement.classList.toggle(
+        "dark",
+        theme === "dark"
+      );
+    } catch (error) {
+      console.error("Could not restore DevSync theme:", error);
+    }
+  })();
+</script>
+
   </head>
   <body>
     <div id="root"></div>

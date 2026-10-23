@@ -6,6 +6,7 @@ import {
   MoreHorizontal,
   CalendarDays,
   MessageSquare,
+  Trash2,
   X,
 } from "lucide-react";
 
@@ -49,6 +50,7 @@ function toApiStatus(status) {
 
 function toDisplayPriority(priority) {
   if (!priority) return "Medium";
+
   return priority.charAt(0).toUpperCase() + priority.slice(1);
 }
 
@@ -77,7 +79,7 @@ function normalizeTask(task) {
   };
 }
 
-function TaskCard({ task, onChangeStatus }) {
+function TaskCard({ task, onChangeStatus, onDelete, deleting }) {
   const [menuOpen, setMenuOpen] = useState(false);
 
   return (
@@ -98,21 +100,38 @@ function TaskCard({ task, onChangeStatus }) {
           </button>
 
           {menuOpen && (
-            <div className="absolute right-0 top-8 z-10 w-40 rounded-lg border border-line bg-surface p-1 shadow-sm">
+            <div className="absolute right-0 top-8 z-10 w-44 rounded-lg border border-line bg-surface p-1 shadow-sm">
               {columns.map((column) => (
                 <button
                   key={column.id}
                   type="button"
+                  disabled={task.status === column.id || deleting}
                   onClick={() => {
-                    onChangeStatus(task.id, column.id);
                     setMenuOpen(false);
+                    onChangeStatus(task.id, column.id);
                   }}
-                  disabled={task.status === column.id}
                   className="w-full rounded-md px-3 py-2 text-left text-xs text-text hover:bg-hover disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Move to {column.title}
                 </button>
               ))}
+
+              <div className="my-1 border-t border-line" />
+
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={() => {
+                  setMenuOpen(false);
+                  onDelete(task.id, task.title);
+                }}
+                className="w-full rounded-md px-3 py-2 text-left text-xs text-red-500 hover:bg-hover disabled:opacity-50"
+              >
+                <span className="flex items-center gap-2">
+                  <Trash2 size={14} />
+                  Delete task
+                </span>
+              </button>
             </div>
           )}
         </div>
@@ -300,6 +319,7 @@ function NewTaskModal({ onClose, onCreate }) {
           >
             Cancel
           </Button>
+
           <Button type="submit" disabled={saving}>
             <Plus size={16} />
             {saving ? "Creating..." : "Create task"}
@@ -314,6 +334,8 @@ export default function Board() {
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
+  const [actionError, setActionError] = useState("");
+  const [deletingId, setDeletingId] = useState(null);
   const [search, setSearch] = useState("");
   const [showModal, setShowModal] = useState(false);
 
@@ -347,9 +369,11 @@ export default function Board() {
 
   async function changeStatus(taskId, newStatus) {
     const task = tasks.find((item) => item.id === taskId);
+
     if (!task || task.status === newStatus) return;
 
     const previousTasks = tasks;
+    setActionError("");
 
     setTasks((current) =>
       current.map((item) =>
@@ -360,7 +384,7 @@ export default function Board() {
     try {
       const response = await taskAPI.update(taskId, {
         title: task.title,
-        description: task.description,
+        description: task.description || "",
         status: toApiStatus(newStatus),
         priority: task.priority.toLowerCase(),
         dueDate: task.dueDate === "No date" ? null : task.dueDate,
@@ -373,13 +397,34 @@ export default function Board() {
       );
     } catch (error) {
       setTasks(previousTasks);
-      setLoadError(error.message || "Failed to update task status.");
+      setActionError(error.message || "Failed to update task status.");
     }
   }
 
   async function createTask(newTask) {
+    setActionError("");
     const response = await taskAPI.create(newTask);
     setTasks((current) => [normalizeTask(response.data), ...current]);
+  }
+
+  async function deleteTask(taskId, taskTitle) {
+    const confirmed = window.confirm(
+      `Are you sure you want to delete "${taskTitle}"? This action cannot be undone.`
+    );
+
+    if (!confirmed) return;
+
+    setDeletingId(taskId);
+    setActionError("");
+
+    try {
+      await taskAPI.delete(taskId);
+      setTasks((current) => current.filter((task) => task.id !== taskId));
+    } catch (error) {
+      setActionError(error.message || "Failed to delete task.");
+    } finally {
+      setDeletingId(null);
+    }
   }
 
   const filteredTasks = tasks.filter((task) =>
@@ -433,19 +478,22 @@ export default function Board() {
         </div>
       </div>
 
-      {loadError && (
+      {(loadError || actionError) && (
         <div
           role="alert"
-          className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-500/30 px-4 py-3 text-sm text-red-500"
+          className="rounded-lg border border-red-500/30 px-4 py-3 text-sm text-red-500"
         >
-          <span>{loadError}</span>
-          <button
-            type="button"
-            onClick={() => window.location.reload()}
-            className="font-medium underline"
-          >
-            Retry
-          </button>
+          {loadError || actionError}
+
+          {loadError && (
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              className="ml-3 font-medium underline"
+            >
+              Retry
+            </button>
+          )}
         </div>
       )}
 
@@ -501,6 +549,8 @@ export default function Board() {
                       key={task.id}
                       task={task}
                       onChangeStatus={changeStatus}
+                      onDelete={deleteTask}
+                      deleting={deletingId === task.id}
                     />
                   ))}
 
