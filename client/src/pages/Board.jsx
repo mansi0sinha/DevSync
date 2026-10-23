@@ -1,5 +1,4 @@
-
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Plus,
   Search,
@@ -7,64 +6,11 @@ import {
   MoreHorizontal,
   CalendarDays,
   MessageSquare,
-  Check,
   X,
 } from "lucide-react";
 
 import Button from "../components/ui/Button";
-
-const initialTasks = [
-  {
-    id: "DS-024",
-    title: "Implement user authentication",
-    description: "Add secure login and registration flow.",
-    status: "In progress",
-    priority: "High",
-    assignee: "MS",
-    comments: 4,
-    dueDate: "Oct 20",
-  },
-  {
-    id: "DS-025",
-    title: "Design database schema",
-    description: "Define the first version of the data models.",
-    status: "To do",
-    priority: "Medium",
-    assignee: "AK",
-    comments: 2,
-    dueDate: "Oct 22",
-  },
-  {
-    id: "DS-026",
-    title: "Review API error handling",
-    description: "Standardize errors returned by API routes.",
-    status: "In review",
-    priority: "Medium",
-    assignee: "RS",
-    comments: 3,
-    dueDate: "Oct 21",
-  },
-  {
-    id: "DS-027",
-    title: "Create dashboard layout",
-    description: "Build the initial responsive dashboard UI.",
-    status: "Done",
-    priority: "Low",
-    assignee: "MS",
-    comments: 1,
-    dueDate: "Oct 16",
-  },
-  {
-    id: "DS-028",
-    title: "Connect discussion to tasks",
-    description: "Keep the conversation context attached to work.",
-    status: "To do",
-    priority: "High",
-    assignee: "AK",
-    comments: 0,
-    dueDate: "Oct 24",
-  },
-];
+import { taskAPI } from "../services/api";
 
 const columns = [
   { id: "To do", title: "To do" },
@@ -79,6 +25,58 @@ const priorityStyles = {
   Low: "border border-line bg-surface text-muted",
 };
 
+function toDisplayStatus(status) {
+  const statusMap = {
+    todo: "To do",
+    "in-progress": "In progress",
+    "in-review": "In review",
+    done: "Done",
+  };
+
+  return statusMap[status] || status;
+}
+
+function toApiStatus(status) {
+  const statusMap = {
+    "To do": "todo",
+    "In progress": "in-progress",
+    "In review": "in-review",
+    Done: "done",
+  };
+
+  return statusMap[status] || "todo";
+}
+
+function toDisplayPriority(priority) {
+  if (!priority) return "Medium";
+  return priority.charAt(0).toUpperCase() + priority.slice(1);
+}
+
+function formatDueDate(date) {
+  if (!date) return "No date";
+
+  const parsedDate = new Date(date);
+
+  if (Number.isNaN(parsedDate.getTime())) return "No date";
+
+  return parsedDate.toLocaleDateString("en-IN", {
+    day: "numeric",
+    month: "short",
+  });
+}
+
+function normalizeTask(task) {
+  return {
+    ...task,
+    id: task._id || task.id,
+    status: toDisplayStatus(task.status),
+    priority: toDisplayPriority(task.priority),
+    assignee: task.assignee || "MS",
+    comments: task.comments ?? 0,
+    dueDate: formatDueDate(task.dueDate),
+  };
+}
+
 function TaskCard({ task, onChangeStatus }) {
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -86,7 +84,7 @@ function TaskCard({ task, onChangeStatus }) {
     <article className="rounded-xl border border-line bg-surface p-4 transition-colors hover:border-faint">
       <div className="flex items-start justify-between gap-2">
         <span className="font-mono text-[11px] text-muted">
-          {task.id}
+          {task.id?.length > 12 ? task.id.slice(-6) : task.id}
         </span>
 
         <div className="relative">
@@ -109,7 +107,8 @@ function TaskCard({ task, onChangeStatus }) {
                     onChangeStatus(task.id, column.id);
                     setMenuOpen(false);
                   }}
-                  className="w-full rounded-md px-3 py-2 text-left text-xs text-text hover:bg-hover"
+                  disabled={task.status === column.id}
+                  className="w-full rounded-md px-3 py-2 text-left text-xs text-text hover:bg-hover disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Move to {column.title}
                 </button>
@@ -124,12 +123,14 @@ function TaskCard({ task, onChangeStatus }) {
       </h3>
 
       <p className="mt-1.5 text-xs leading-5 text-muted">
-        {task.description}
+        {task.description || "No description added."}
       </p>
 
       <div className="mt-4 flex flex-wrap items-center gap-2">
         <span
-          className={`rounded-md px-2 py-1 text-[11px] font-medium ${priorityStyles[task.priority]}`}
+          className={`rounded-md px-2 py-1 text-[11px] font-medium ${
+            priorityStyles[task.priority] || priorityStyles.Medium
+          }`}
         >
           {task.priority}
         </span>
@@ -164,30 +165,42 @@ function NewTaskModal({ onClose, onCreate }) {
   const [description, setDescription] = useState("");
   const [status, setStatus] = useState("To do");
   const [priority, setPriority] = useState("Medium");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
 
-  function handleSubmit(event) {
+  async function handleSubmit(event) {
     event.preventDefault();
 
-    if (!title.trim()) return;
+    if (!title.trim()) {
+      setError("Please enter a task title.");
+      return;
+    }
 
-    onCreate({
-      title: title.trim(),
-      description: description.trim() || "No description added.",
-      status,
-      priority,
-      assignee: "MS",
-      comments: 0,
-      dueDate: "No date",
-    });
+    setSaving(true);
+    setError("");
 
-    onClose();
+    try {
+      await onCreate({
+        title: title.trim(),
+        description: description.trim(),
+        status: toApiStatus(status),
+        priority: priority.toLowerCase(),
+        dueDate: null,
+      });
+
+      onClose();
+    } catch (err) {
+      setError(err.message || "Failed to create task.");
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
       onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
+        if (event.target === event.currentTarget && !saving) onClose();
       }}
     >
       <form
@@ -196,9 +209,7 @@ function NewTaskModal({ onClose, onCreate }) {
       >
         <div className="mb-5 flex items-center justify-between">
           <div>
-            <h2 className="text-lg font-semibold text-text">
-              Create task
-            </h2>
+            <h2 className="text-lg font-semibold text-text">Create task</h2>
             <p className="mt-1 text-sm text-muted">
               Add a task to your workspace.
             </p>
@@ -207,6 +218,7 @@ function NewTaskModal({ onClose, onCreate }) {
           <button
             type="button"
             onClick={onClose}
+            disabled={saving}
             aria-label="Close dialog"
             className="rounded-md p-2 text-muted hover:bg-hover hover:text-text"
           >
@@ -220,6 +232,7 @@ function NewTaskModal({ onClose, onCreate }) {
         <input
           autoFocus
           required
+          maxLength={120}
           value={title}
           onChange={(event) => setTitle(event.target.value)}
           placeholder="e.g. Build authentication flow"
@@ -230,6 +243,7 @@ function NewTaskModal({ onClose, onCreate }) {
           Description
         </label>
         <textarea
+          maxLength={2000}
           value={description}
           onChange={(event) => setDescription(event.target.value)}
           placeholder="What needs to be done?"
@@ -271,13 +285,24 @@ function NewTaskModal({ onClose, onCreate }) {
           </div>
         </div>
 
+        {error && (
+          <p role="alert" className="mb-4 text-sm text-red-500">
+            {error}
+          </p>
+        )}
+
         <div className="flex justify-end gap-2">
-          <Button variant="secondary" onClick={onClose}>
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={onClose}
+            disabled={saving}
+          >
             Cancel
           </Button>
-          <Button type="submit">
+          <Button type="submit" disabled={saving}>
             <Plus size={16} />
-            Create task
+            {saving ? "Creating..." : "Create task"}
           </Button>
         </div>
       </form>
@@ -286,37 +311,85 @@ function NewTaskModal({ onClose, onCreate }) {
 }
 
 export default function Board() {
-  const [tasks, setTasks] = useState(initialTasks);
+  const [tasks, setTasks] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [search, setSearch] = useState("");
   const [showModal, setShowModal] = useState(false);
 
-  function changeStatus(taskId, newStatus) {
+  useEffect(() => {
+    let active = true;
+
+    async function loadTasks() {
+      try {
+        setLoadError("");
+        const response = await taskAPI.getAll();
+
+        if (active) {
+          setTasks((response.data || []).map(normalizeTask));
+        }
+      } catch (error) {
+        if (active) {
+          setLoadError(error.message || "Failed to load tasks.");
+          console.error("Failed to load tasks:", error);
+        }
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+
+    loadTasks();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  async function changeStatus(taskId, newStatus) {
+    const task = tasks.find((item) => item.id === taskId);
+    if (!task || task.status === newStatus) return;
+
+    const previousTasks = tasks;
+
     setTasks((current) =>
-      current.map((task) =>
-        task.id === taskId ? { ...task, status: newStatus } : task
+      current.map((item) =>
+        item.id === taskId ? { ...item, status: newStatus } : item
       )
     );
+
+    try {
+      const response = await taskAPI.update(taskId, {
+        title: task.title,
+        description: task.description,
+        status: toApiStatus(newStatus),
+        priority: task.priority.toLowerCase(),
+        dueDate: task.dueDate === "No date" ? null : task.dueDate,
+      });
+
+      setTasks((current) =>
+        current.map((item) =>
+          item.id === taskId ? normalizeTask(response.data) : item
+        )
+      );
+    } catch (error) {
+      setTasks(previousTasks);
+      setLoadError(error.message || "Failed to update task status.");
+    }
   }
 
-  function createTask(newTask) {
-    setTasks((current) => [
-      {
-        ...newTask,
-        id: `DS-${String(29 + current.length - initialTasks.length).padStart(3, "0")}`,
-      },
-      ...current,
-    ]);
+  async function createTask(newTask) {
+    const response = await taskAPI.create(newTask);
+    setTasks((current) => [normalizeTask(response.data), ...current]);
   }
 
   const filteredTasks = tasks.filter((task) =>
-    `${task.title} ${task.id} ${task.description}`
+    `${task.title} ${task.id} ${task.description || ""}`
       .toLowerCase()
       .includes(search.toLowerCase())
   );
 
   return (
     <div className="mx-auto w-full max-w-[1600px] space-y-6 pb-8">
-      {/* Page header */}
       <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
         <div>
           <p className="mb-2 text-sm text-muted">
@@ -338,7 +411,6 @@ export default function Board() {
         </Button>
       </div>
 
-      {/* Board toolbar */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="relative w-full sm:max-w-xs">
           <Search
@@ -361,82 +433,99 @@ export default function Board() {
         </div>
       </div>
 
-      {/* Board columns */}
-      <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-2 2xl:grid-cols-4">
-        {columns.map((column) => {
-          const columnTasks = filteredTasks.filter(
-            (task) => task.status === column.id
-          );
+      {loadError && (
+        <div
+          role="alert"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-500/30 px-4 py-3 text-sm text-red-500"
+        >
+          <span>{loadError}</span>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="font-medium underline"
+          >
+            Retry
+          </button>
+        </div>
+      )}
 
-          return (
-            <section
-              key={column.id}
-              className="min-w-0 rounded-xl border border-line bg-col p-3"
-            >
-              <div className="mb-3 flex items-center justify-between px-1 py-1">
-                <div className="flex items-center gap-2">
-                  <span
-                    className={`h-2 w-2 rounded-full ${
-                      column.id === "Done"
-                        ? "bg-acc"
-                        : column.id === "In progress"
+      {loading ? (
+        <div className="rounded-xl border border-line bg-surface px-4 py-12 text-center">
+          <p className="text-sm text-muted">Loading tasks from MongoDB...</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-2 2xl:grid-cols-4">
+          {columns.map((column) => {
+            const columnTasks = filteredTasks.filter(
+              (task) => task.status === column.id
+            );
+
+            return (
+              <section
+                key={column.id}
+                className="min-w-0 rounded-xl border border-line bg-col p-3"
+              >
+                <div className="mb-3 flex items-center justify-between px-1 py-1">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`h-2 w-2 rounded-full ${
+                        column.id === "Done" || column.id === "In progress"
                           ? "bg-acc"
                           : "bg-faint"
-                    }`}
-                  />
+                      }`}
+                    />
 
-                  <h2 className="text-sm font-semibold text-text">
-                    {column.title}
-                  </h2>
+                    <h2 className="text-sm font-semibold text-text">
+                      {column.title}
+                    </h2>
 
-                  <span className="font-mono text-xs text-muted">
-                    {columnTasks.length}
-                  </span>
+                    <span className="font-mono text-xs text-muted">
+                      {columnTasks.length}
+                    </span>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowModal(true)}
+                    aria-label={`Add task to ${column.title}`}
+                    title={`Add task to ${column.title}`}
+                    className="rounded-md p-1 text-muted transition-colors hover:bg-hover hover:text-text"
+                  >
+                    <Plus size={16} />
+                  </button>
+                </div>
+
+                <div className="space-y-3">
+                  {columnTasks.map((task) => (
+                    <TaskCard
+                      key={task.id}
+                      task={task}
+                      onChangeStatus={changeStatus}
+                    />
+                  ))}
+
+                  {columnTasks.length === 0 && (
+                    <div className="rounded-lg border border-dashed border-faint px-3 py-6 text-center">
+                      <p className="text-xs text-muted">
+                        No tasks in this column
+                      </p>
+                    </div>
+                  )}
                 </div>
 
                 <button
                   type="button"
-                  onClick={() => {
-                    setShowModal(true);
-                  }}
-                  aria-label={`Add task to ${column.title}`}
-                  title={`Add task to ${column.title}`}
-                  className="rounded-md p-1 text-muted transition-colors hover:bg-hover hover:text-text"
+                  onClick={() => setShowModal(true)}
+                  className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-faint px-3 py-2.5 text-xs font-medium text-muted transition-colors hover:border-line hover:bg-hover hover:text-text"
                 >
-                  <Plus size={16} />
+                  <Plus size={14} />
+                  Add a task
                 </button>
-              </div>
-
-              <div className="space-y-3">
-                {columnTasks.map((task) => (
-                  <TaskCard
-                    key={task.id}
-                    task={task}
-                    onChangeStatus={changeStatus}
-                  />
-                ))}
-
-                {columnTasks.length === 0 && (
-                  <div className="rounded-lg border border-dashed border-faint px-3 py-6 text-center">
-                    <p className="text-xs text-muted">
-                      No tasks in this column
-                    </p>
-                  </div>
-                )}
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setShowModal(true)}
-                className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-faint px-3 py-2.5 text-xs font-medium text-muted transition-colors hover:border-line hover:bg-hover hover:text-text"
-              >
-                <Plus size={14} />
-                Add a task
-              </button>
-            </section>
-          );
-        })}
-      </div>
+              </section>
+            );
+          })}
+        </div>
+      )}
 
       {showModal && (
         <NewTaskModal
