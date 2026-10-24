@@ -1,3 +1,4 @@
+
 import { useEffect, useState } from "react";
 import {
   Plus,
@@ -8,6 +9,7 @@ import {
   MessageSquare,
   Trash2,
   X,
+  Pencil,
 } from "lucide-react";
 
 import Button from "../components/ui/Button";
@@ -54,10 +56,24 @@ function toDisplayPriority(priority) {
   return priority.charAt(0).toUpperCase() + priority.slice(1);
 }
 
+// Preserve the date as YYYY-MM-DD for editing and API requests.
+function toDateInputValue(date) {
+  if (!date) return "";
+
+  const parsedDate = new Date(date);
+
+  if (Number.isNaN(parsedDate.getTime())) return "";
+
+  return parsedDate.toISOString().slice(0, 10);
+}
+
 function formatDueDate(date) {
   if (!date) return "No date";
 
-  const parsedDate = new Date(date);
+  const parsedDate =
+    typeof date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(date)
+      ? new Date(`${date}T00:00:00`)
+      : new Date(date);
 
   if (Number.isNaN(parsedDate.getTime())) return "No date";
 
@@ -75,11 +91,18 @@ function normalizeTask(task) {
     priority: toDisplayPriority(task.priority),
     assignee: task.assignee || "MS",
     comments: task.comments ?? 0,
-    dueDate: formatDueDate(task.dueDate),
+    dueDate: toDateInputValue(task.dueDate),
   };
 }
 
-function TaskCard({ task, onChangeStatus, onDelete, deleting }) {
+function TaskCard({
+  task,
+  onEdit,
+  onChangeStatus,
+  onDelete,
+  deleting,
+  updating,
+}) {
   const [menuOpen, setMenuOpen] = useState(false);
 
   return (
@@ -93,26 +116,48 @@ function TaskCard({ task, onChangeStatus, onDelete, deleting }) {
           <button
             type="button"
             aria-label={`Options for ${task.title}`}
+            aria-expanded={menuOpen}
             onClick={() => setMenuOpen((open) => !open)}
-            className="rounded-md p-1 text-muted hover:bg-hover hover:text-text"
+            disabled={deleting || updating}
+            className="rounded-md p-1 text-muted hover:bg-hover hover:text-text disabled:opacity-50"
           >
             <MoreHorizontal size={17} />
           </button>
 
           {menuOpen && (
-            <div className="absolute right-0 top-8 z-10 w-44 rounded-lg border border-line bg-surface p-1 shadow-sm">
+            <div className="absolute right-0 top-8 z-20 w-44 rounded-lg border border-line bg-surface p-1 shadow-lg">
+              <button
+                type="button"
+                onClick={() => {
+                  setMenuOpen(false);
+                  onEdit(task);
+                }}
+                className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs text-text hover:bg-hover"
+              >
+                <Pencil size={14} />
+                Edit task
+              </button>
+
+              <div className="my-1 border-t border-line" />
+
+              <p className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted">
+                Move task
+              </p>
+
               {columns.map((column) => (
                 <button
                   key={column.id}
                   type="button"
-                  disabled={task.status === column.id || deleting}
+                  disabled={
+                    task.status === column.id || deleting || updating
+                  }
                   onClick={() => {
                     setMenuOpen(false);
                     onChangeStatus(task.id, column.id);
                   }}
-                  className="w-full rounded-md px-3 py-2 text-left text-xs text-text hover:bg-hover disabled:cursor-not-allowed disabled:opacity-50"
+                  className="w-full rounded-md px-3 py-2 text-left text-xs text-text hover:bg-hover disabled:cursor-not-allowed disabled:opacity-40"
                 >
-                  Move to {column.title}
+                  {column.title}
                 </button>
               ))}
 
@@ -120,28 +165,26 @@ function TaskCard({ task, onChangeStatus, onDelete, deleting }) {
 
               <button
                 type="button"
-                disabled={deleting}
+                disabled={deleting || updating}
                 onClick={() => {
                   setMenuOpen(false);
                   onDelete(task.id, task.title);
                 }}
-                className="w-full rounded-md px-3 py-2 text-left text-xs text-red-500 hover:bg-hover disabled:opacity-50"
+                className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs text-red-500 hover:bg-hover disabled:opacity-50"
               >
-                <span className="flex items-center gap-2">
-                  <Trash2 size={14} />
-                  Delete task
-                </span>
+                <Trash2 size={14} />
+                Delete task
               </button>
             </div>
           )}
         </div>
       </div>
 
-      <h3 className="mt-2 text-sm font-semibold leading-5 text-text">
+      <h3 className="mt-2 break-words text-sm font-semibold leading-5 text-text">
         {task.title}
       </h3>
 
-      <p className="mt-1.5 text-xs leading-5 text-muted">
+      <p className="mt-1.5 whitespace-pre-wrap break-words text-xs leading-5 text-muted">
         {task.description || "No description added."}
       </p>
 
@@ -153,24 +196,31 @@ function TaskCard({ task, onChangeStatus, onDelete, deleting }) {
         >
           {task.priority}
         </span>
+
+        {updating && (
+          <span className="text-[11px] text-muted">Saving...</span>
+        )}
       </div>
 
-      <div className="mt-4 flex items-center justify-between border-t border-line pt-3">
-        <div className="flex items-center gap-3 text-muted">
-          <span className="flex items-center gap-1 text-xs">
+      <div className="mt-4 flex items-center justify-between gap-2 border-t border-line pt-3">
+        <div className="flex flex-wrap items-center gap-3 text-muted">
+          <span
+            className="flex items-center gap-1 text-xs"
+            title="Comment count is not persisted by the current task model"
+          >
             <MessageSquare size={13} />
             {task.comments}
           </span>
 
           <span className="flex items-center gap-1 text-xs">
             <CalendarDays size={13} />
-            {task.dueDate}
+            {formatDueDate(task.dueDate)}
           </span>
         </div>
 
         <div
           title={`Assigned to ${task.assignee}`}
-          className="flex h-7 w-7 items-center justify-center rounded-full border border-line bg-hover font-mono text-[10px] font-medium text-text"
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-line bg-hover font-mono text-[10px] font-medium text-text"
         >
           {task.assignee}
         </div>
@@ -179,11 +229,25 @@ function TaskCard({ task, onChangeStatus, onDelete, deleting }) {
   );
 }
 
-function NewTaskModal({ onClose, onCreate }) {
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
-  const [status, setStatus] = useState("To do");
-  const [priority, setPriority] = useState("Medium");
+function TaskModal({
+  task,
+  initialStatus = "To do",
+  onClose,
+  onSave,
+}) {
+  const isEditing = Boolean(task);
+
+  const [title, setTitle] = useState(task?.title || "");
+  const [description, setDescription] = useState(
+    task?.description || ""
+  );
+  const [status, setStatus] = useState(
+    task?.status || initialStatus
+  );
+  const [priority, setPriority] = useState(
+    task?.priority || "Medium"
+  );
+  const [dueDate, setDueDate] = useState(task?.dueDate || "");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -198,18 +262,27 @@ function NewTaskModal({ onClose, onCreate }) {
     setSaving(true);
     setError("");
 
+    const payload = {
+      title: title.trim(),
+      description: description.trim(),
+      status: toApiStatus(status),
+      priority: priority.toLowerCase(),
+      dueDate: dueDate || null,
+    };
+
     try {
-      await onCreate({
-        title: title.trim(),
-        description: description.trim(),
-        status: toApiStatus(status),
-        priority: priority.toLowerCase(),
-        dueDate: null,
-      });
+      if (isEditing) {
+        await onSave(task.id, payload);
+      } else {
+        await onSave(payload);
+      }
 
       onClose();
     } catch (err) {
-      setError(err.message || "Failed to create task.");
+      setError(
+        err.message ||
+          `Failed to ${isEditing ? "update" : "create"} task.`
+      );
     } finally {
       setSaving(false);
     }
@@ -217,20 +290,27 @@ function NewTaskModal({ onClose, onCreate }) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/50 p-4 backdrop-blur-[2px]"
       onMouseDown={(event) => {
-        if (event.target === event.currentTarget && !saving) onClose();
+        if (event.target === event.currentTarget && !saving) {
+          onClose();
+        }
       }}
     >
       <form
         onSubmit={handleSubmit}
-        className="w-full max-w-md rounded-xl border border-line bg-surface p-6"
+        className="my-auto w-full max-w-md rounded-xl border border-line bg-surface p-6 shadow-xl"
       >
-        <div className="mb-5 flex items-center justify-between">
+        <div className="mb-5 flex items-start justify-between gap-4">
           <div>
-            <h2 className="text-lg font-semibold text-text">Create task</h2>
+            <h2 className="text-lg font-semibold text-text">
+              {isEditing ? "Edit task" : "Create task"}
+            </h2>
+
             <p className="mt-1 text-sm text-muted">
-              Add a task to your workspace.
+              {isEditing
+                ? "Update the details of this task."
+                : "Add a task to your workspace."}
             </p>
           </div>
 
@@ -239,16 +319,21 @@ function NewTaskModal({ onClose, onCreate }) {
             onClick={onClose}
             disabled={saving}
             aria-label="Close dialog"
-            className="rounded-md p-2 text-muted hover:bg-hover hover:text-text"
+            className="rounded-md p-2 text-muted hover:bg-hover hover:text-text disabled:opacity-50"
           >
             <X size={18} />
           </button>
         </div>
 
-        <label className="mb-1.5 block text-sm font-medium text-text">
+        <label
+          htmlFor="task-title"
+          className="mb-1.5 block text-sm font-medium text-text"
+        >
           Task title
         </label>
+
         <input
+          id="task-title"
           autoFocus
           required
           maxLength={120}
@@ -258,10 +343,15 @@ function NewTaskModal({ onClose, onCreate }) {
           className="mb-4 w-full rounded-lg border border-line bg-bg px-3 py-2.5 text-sm text-text outline-none placeholder:text-muted focus:border-acc"
         />
 
-        <label className="mb-1.5 block text-sm font-medium text-text">
+        <label
+          htmlFor="task-description"
+          className="mb-1.5 block text-sm font-medium text-text"
+        >
           Description
         </label>
+
         <textarea
+          id="task-description"
           maxLength={2000}
           value={description}
           onChange={(event) => setDescription(event.target.value)}
@@ -270,12 +360,17 @@ function NewTaskModal({ onClose, onCreate }) {
           className="mb-4 w-full resize-y rounded-lg border border-line bg-bg px-3 py-2.5 text-sm text-text outline-none placeholder:text-muted focus:border-acc"
         />
 
-        <div className="mb-5 grid grid-cols-2 gap-3">
+        <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
-            <label className="mb-1.5 block text-sm font-medium text-text">
+            <label
+              htmlFor="task-status"
+              className="mb-1.5 block text-sm font-medium text-text"
+            >
               Status
             </label>
+
             <select
+              id="task-status"
               value={status}
               onChange={(event) => setStatus(event.target.value)}
               className="w-full rounded-lg border border-line bg-bg px-3 py-2.5 text-sm text-text outline-none focus:border-acc"
@@ -289,20 +384,40 @@ function NewTaskModal({ onClose, onCreate }) {
           </div>
 
           <div>
-            <label className="mb-1.5 block text-sm font-medium text-text">
+            <label
+              htmlFor="task-priority"
+              className="mb-1.5 block text-sm font-medium text-text"
+            >
               Priority
             </label>
+
             <select
+              id="task-priority"
               value={priority}
               onChange={(event) => setPriority(event.target.value)}
               className="w-full rounded-lg border border-line bg-bg px-3 py-2.5 text-sm text-text outline-none focus:border-acc"
             >
-              <option>Low</option>
-              <option>Medium</option>
-              <option>High</option>
+              <option value="Low">Low</option>
+              <option value="Medium">Medium</option>
+              <option value="High">High</option>
             </select>
           </div>
         </div>
+
+        <label
+          htmlFor="task-due-date"
+          className="mb-1.5 block text-sm font-medium text-text"
+        >
+          Due date <span className="font-normal text-muted">(optional)</span>
+        </label>
+
+        <input
+          id="task-due-date"
+          type="date"
+          value={dueDate}
+          onChange={(event) => setDueDate(event.target.value)}
+          className="mb-5 w-full rounded-lg border border-line bg-bg px-3 py-2.5 text-sm text-text outline-none focus:border-acc"
+        />
 
         {error && (
           <p role="alert" className="mb-4 text-sm text-red-500">
@@ -321,8 +436,14 @@ function NewTaskModal({ onClose, onCreate }) {
           </Button>
 
           <Button type="submit" disabled={saving}>
-            <Plus size={16} />
-            {saving ? "Creating..." : "Create task"}
+            {isEditing ? <Pencil size={15} /> : <Plus size={16} />}
+            {saving
+              ? isEditing
+                ? "Saving..."
+                : "Creating..."
+              : isEditing
+                ? "Save changes"
+                : "Create task"}
           </Button>
         </div>
       </form>
@@ -336,8 +457,11 @@ export default function Board() {
   const [loadError, setLoadError] = useState("");
   const [actionError, setActionError] = useState("");
   const [deletingId, setDeletingId] = useState(null);
+  const [updatingId, setUpdatingId] = useState(null);
   const [search, setSearch] = useState("");
   const [showModal, setShowModal] = useState(false);
+  const [editingTask, setEditingTask] = useState(null);
+  const [createStatus, setCreateStatus] = useState("To do");
 
   useEffect(() => {
     let active = true;
@@ -345,6 +469,7 @@ export default function Board() {
     async function loadTasks() {
       try {
         setLoadError("");
+
         const response = await taskAPI.getAll();
 
         if (active) {
@@ -370,10 +495,19 @@ export default function Board() {
   async function changeStatus(taskId, newStatus) {
     const task = tasks.find((item) => item.id === taskId);
 
-    if (!task || task.status === newStatus) return;
+    if (
+      !task ||
+      task.status === newStatus ||
+      updatingId ||
+      deletingId
+    ) {
+      return;
+    }
 
     const previousTasks = tasks;
+
     setActionError("");
+    setUpdatingId(taskId);
 
     setTasks((current) =>
       current.map((item) =>
@@ -387,7 +521,7 @@ export default function Board() {
         description: task.description || "",
         status: toApiStatus(newStatus),
         priority: task.priority.toLowerCase(),
-        dueDate: task.dueDate === "No date" ? null : task.dueDate,
+        dueDate: task.dueDate || null,
       });
 
       setTasks((current) =>
@@ -398,16 +532,34 @@ export default function Board() {
     } catch (error) {
       setTasks(previousTasks);
       setActionError(error.message || "Failed to update task status.");
+    } finally {
+      setUpdatingId(null);
     }
   }
 
   async function createTask(newTask) {
     setActionError("");
+
     const response = await taskAPI.create(newTask);
+
     setTasks((current) => [normalizeTask(response.data), ...current]);
   }
 
+  async function editTask(taskId, updates) {
+    setActionError("");
+
+    const response = await taskAPI.update(taskId, updates);
+
+    setTasks((current) =>
+      current.map((task) =>
+        task.id === taskId ? normalizeTask(response.data) : task
+      )
+    );
+  }
+
   async function deleteTask(taskId, taskTitle) {
+    if (updatingId || deletingId) return;
+
     const confirmed = window.confirm(
       `Are you sure you want to delete "${taskTitle}"? This action cannot be undone.`
     );
@@ -419,7 +571,10 @@ export default function Board() {
 
     try {
       await taskAPI.delete(taskId);
-      setTasks((current) => current.filter((task) => task.id !== taskId));
+
+      setTasks((current) =>
+        current.filter((task) => task.id !== taskId)
+      );
     } catch (error) {
       setActionError(error.message || "Failed to delete task.");
     } finally {
@@ -430,8 +585,26 @@ export default function Board() {
   const filteredTasks = tasks.filter((task) =>
     `${task.title} ${task.id} ${task.description || ""}`
       .toLowerCase()
-      .includes(search.toLowerCase())
+      .includes(search.trim().toLowerCase())
   );
+
+  function openCreateModal(status = "To do") {
+    setActionError("");
+    setEditingTask(null);
+    setCreateStatus(status);
+    setShowModal(true);
+  }
+
+  function openEditModal(task) {
+    setActionError("");
+    setShowModal(false);
+    setEditingTask(task);
+  }
+
+  function closeModal() {
+    setShowModal(false);
+    setEditingTask(null);
+  }
 
   return (
     <div className="mx-auto w-full max-w-[1600px] space-y-6 pb-8">
@@ -450,7 +623,7 @@ export default function Board() {
           </p>
         </div>
 
-        <Button onClick={() => setShowModal(true)}>
+        <Button onClick={() => openCreateModal("To do")}>
           <Plus size={17} />
           New task
         </Button>
@@ -474,7 +647,10 @@ export default function Board() {
 
         <div className="flex items-center gap-2 text-xs text-muted">
           <SlidersHorizontal size={15} />
-          <span>{filteredTasks.length} tasks</span>
+          <span>
+            {filteredTasks.length}{" "}
+            {filteredTasks.length === 1 ? "task" : "tasks"}
+          </span>
         </div>
       </div>
 
@@ -499,7 +675,9 @@ export default function Board() {
 
       {loading ? (
         <div className="rounded-xl border border-line bg-surface px-4 py-12 text-center">
-          <p className="text-sm text-muted">Loading tasks from MongoDB...</p>
+          <p className="text-sm text-muted">
+            Loading tasks from MongoDB...
+          </p>
         </div>
       ) : (
         <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-2 2xl:grid-cols-4">
@@ -514,9 +692,9 @@ export default function Board() {
                 className="min-w-0 rounded-xl border border-line bg-col p-3"
               >
                 <div className="mb-3 flex items-center justify-between px-1 py-1">
-                  <div className="flex items-center gap-2">
+                  <div className="flex min-w-0 items-center gap-2">
                     <span
-                      className={`h-2 w-2 rounded-full ${
+                      className={`h-2 w-2 shrink-0 rounded-full ${
                         column.id === "Done" || column.id === "In progress"
                           ? "bg-acc"
                           : "bg-faint"
@@ -534,7 +712,7 @@ export default function Board() {
 
                   <button
                     type="button"
-                    onClick={() => setShowModal(true)}
+                    onClick={() => openCreateModal(column.id)}
                     aria-label={`Add task to ${column.title}`}
                     title={`Add task to ${column.title}`}
                     className="rounded-md p-1 text-muted transition-colors hover:bg-hover hover:text-text"
@@ -548,16 +726,20 @@ export default function Board() {
                     <TaskCard
                       key={task.id}
                       task={task}
+                      onEdit={openEditModal}
                       onChangeStatus={changeStatus}
                       onDelete={deleteTask}
                       deleting={deletingId === task.id}
+                      updating={updatingId === task.id}
                     />
                   ))}
 
                   {columnTasks.length === 0 && (
                     <div className="rounded-lg border border-dashed border-faint px-3 py-6 text-center">
                       <p className="text-xs text-muted">
-                        No tasks in this column
+                        {search
+                          ? "No matching tasks"
+                          : "No tasks in this column"}
                       </p>
                     </div>
                   )}
@@ -565,7 +747,7 @@ export default function Board() {
 
                 <button
                   type="button"
-                  onClick={() => setShowModal(true)}
+                  onClick={() => openCreateModal(column.id)}
                   className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-faint px-3 py-2.5 text-xs font-medium text-muted transition-colors hover:border-line hover:bg-hover hover:text-text"
                 >
                   <Plus size={14} />
@@ -578,9 +760,20 @@ export default function Board() {
       )}
 
       {showModal && (
-        <NewTaskModal
-          onClose={() => setShowModal(false)}
-          onCreate={createTask}
+        <TaskModal
+          key={createStatus}
+          initialStatus={createStatus}
+          onClose={closeModal}
+          onSave={createTask}
+        />
+      )}
+
+      {editingTask && (
+        <TaskModal
+          key={editingTask.id}
+          task={editingTask}
+          onClose={closeModal}
+          onSave={editTask}
         />
       )}
     </div>
