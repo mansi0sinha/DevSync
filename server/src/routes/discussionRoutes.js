@@ -30,7 +30,12 @@ router.post("/", async (req, res) => {
   try {
     const { title, project, taskId, message } = req.body;
 
-    if (!title?.trim() || !message?.trim()) {
+    if (
+      typeof title !== "string" ||
+      !title.trim() ||
+      typeof message !== "string" ||
+      !message.trim()
+    ) {
       return res.status(400).json({
         success: false,
         message: "Discussion title and first message are required",
@@ -39,8 +44,12 @@ router.post("/", async (req, res) => {
 
     const discussion = await Discussion.create({
       title: title.trim(),
-      project: project?.trim() || "Platform",
-      taskId: taskId?.trim() || "",
+      project:
+        typeof project === "string" && project.trim()
+          ? project.trim()
+          : "Platform",
+      taskId:
+        typeof taskId === "string" ? taskId.trim() : "",
       status: "Open",
       messages: [
         {
@@ -105,7 +114,6 @@ router.post("/:id/messages", async (req, res) => {
       });
     }
 
-    // A message must contain text or at least one attachment.
     if (!text.trim() && attachments.length === 0) {
       return res.status(400).json({
         success: false,
@@ -181,16 +189,36 @@ router.put("/:id", async (req, res) => {
       if (decision === null) {
         updates.decision = null;
       } else {
-        if (!decision.title?.trim() || !decision.summary?.trim()) {
+        if (
+          !decision ||
+          typeof decision.title !== "string" ||
+          !decision.title.trim() ||
+          typeof decision.summary !== "string" ||
+          !decision.summary.trim()
+        ) {
           return res.status(400).json({
             success: false,
             message: "Decision title and summary are required",
           });
         }
 
+        if (
+          decision.context !== undefined &&
+          typeof decision.context !== "string"
+        ) {
+          return res.status(400).json({
+            success: false,
+            message: "Decision context must be a string",
+          });
+        }
+
         updates.decision = {
           title: decision.title.trim(),
           summary: decision.summary.trim(),
+          context:
+            typeof decision.context === "string"
+              ? decision.context.trim()
+              : "",
         };
 
         updates.status = "Resolved";

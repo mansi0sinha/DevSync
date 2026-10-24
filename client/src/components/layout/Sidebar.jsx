@@ -57,7 +57,7 @@ export default function Sidebar({
   return (
     <aside
       className={`m-3 flex h-[calc(100vh-24px)] shrink-0 flex-col overflow-hidden rounded-xl border border-line bg-side transition-[width] duration-200 ${
-        isCollapsed ? "w-[76px]" : "w-64"
+        isCollapsed ? "w-19" : "w-64"
       }`}
     >
       {/* Brand and collapse button */}

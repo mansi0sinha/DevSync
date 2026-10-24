@@ -180,11 +180,11 @@ function TaskCard({
         </div>
       </div>
 
-      <h3 className="mt-2 break-words text-sm font-semibold leading-5 text-text">
+      <h3 className="mt-2 wrap-break-word text-sm font-semibold leading-5 text-text">
         {task.title}
       </h3>
 
-      <p className="mt-1.5 whitespace-pre-wrap break-words text-xs leading-5 text-muted">
+      <p className="mt-1.5 whitespace-pre-wrap wrap-break-word text-xs leading-5 text-muted">
         {task.description || "No description added."}
       </p>
 

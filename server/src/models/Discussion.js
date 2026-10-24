@@ -74,6 +74,12 @@ const decisionSchema = new mongoose.Schema(
       trim: true,
       maxlength: [5000, "Decision summary cannot exceed 5000 characters"],
     },
+    context: {
+      type: String,
+      trim: true,
+      default: "",
+      maxlength: [5000, "Decision context cannot exceed 5000 characters"],
+    },
   },
   { _id: false }
 );
