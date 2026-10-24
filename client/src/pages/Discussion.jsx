@@ -1,5 +1,5 @@
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   MessageSquare,
   Search,
@@ -10,87 +10,84 @@ import {
   GitMerge,
   Check,
   X,
+  FileText,
+  Image as ImageIcon,
+  Download,
 } from "lucide-react";
 
 import Button from "../components/ui/Button";
+import {
+  discussionAPI,
+  uploadAPI,
+  getAttachmentURL,
+} from "../services/api";
 
-const initialThreads = [
-  {
-    id: 1,
-    title: "API response structure",
-    project: "Platform",
-    taskId: "DS-026",
-    status: "Open",
-    messages: [
-      {
-        id: 1,
-        author: "Aarav Kumar",
-        initials: "AK",
-        time: "10:24 AM",
-        text: "Should we keep the API response structure consistent across all endpoints?",
-      },
-      {
-        id: 2,
-        author: "Mansi Sinha",
-        initials: "MS",
-        time: "10:29 AM",
-        text: "I think we should. A consistent format will make error handling and frontend integration easier.",
-      },
-      {
-        id: 3,
-        author: "Riya Sharma",
-        initials: "RS",
-        time: "10:35 AM",
-        text: "Agreed. Let's use a standard structure with data, message, and error fields.",
-      },
-    ],
-    decision: null,
-  },
-  {
-    id: 2,
-    title: "Authentication strategy",
-    project: "Platform",
-    taskId: "DS-024",
-    status: "Resolved",
-    messages: [
-      {
-        id: 1,
-        author: "Riya Sharma",
-        initials: "RS",
-        time: "9:15 AM",
-        text: "We need to choose an authentication strategy before implementing the login flow.",
-      },
-      {
-        id: 2,
-        author: "Mansi Sinha",
-        initials: "MS",
-        time: "9:21 AM",
-        text: "For our current architecture, JWT-based authentication should work well. We should keep token handling secure.",
-      },
-    ],
-    decision: {
-      title: "Use JWT for authentication",
-      summary: "Adopt JWT-based authentication for the initial implementation.",
-    },
-  },
-  {
-    id: 3,
-    title: "Dashboard component structure",
-    project: "Web App",
-    taskId: "DS-027",
-    status: "Open",
-    messages: [
-      {
-        id: 1,
-        author: "Aarav Kumar",
-        initials: "AK",
-        time: "Yesterday",
-        text: "Should dashboard cards live in separate reusable components?",
-      },
-    ],
-    decision: null,
-  },
+const MAX_FILES = 5;
+const MAX_FILE_SIZE = 5 * 1024 * 1024;
+
+const ALLOWED_EXTENSIONS = [
+  "jpg",
+  "jpeg",
+  "png",
+  "webp",
+  "pdf",
+  "txt",
 ];
+
+function formatFileSize(bytes = 0) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+function isAllowedFile(file) {
+  const extension = file.name.split(".").pop()?.toLowerCase();
+  return ALLOWED_EXTENSIONS.includes(extension);
+}
+
+function formatMessageTime(dateValue) {
+  if (!dateValue) return "Just now";
+
+  const date = new Date(dateValue);
+  if (Number.isNaN(date.getTime())) return "Just now";
+
+  if (date.toDateString() === new Date().toDateString()) {
+    return date.toLocaleTimeString([], {
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  }
+
+  return date.toLocaleDateString([], {
+    month: "short",
+    day: "numeric",
+  });
+}
+
+function normalizeThread(thread) {
+  return {
+    ...thread,
+    id: thread._id || thread.id,
+    taskId: thread.taskId || "",
+    status: thread.status || "Open",
+    decision: thread.decision || null,
+    messages: (thread.messages || []).map((item, index) => ({
+      ...item,
+      id: item._id || item.id || `${thread._id || thread.id}-message-${index}`,
+      text: item.text || "",
+      attachments: item.attachments || [],
+      initials:
+        item.initials ||
+        (item.author || "U")
+          .split(" ")
+          .map((part) => part[0])
+          .join("")
+          .slice(0, 2)
+          .toUpperCase(),
+      time: item.time || formatMessageTime(item.createdAt),
+    })),
+  };
+}
 
 function Avatar({ initials, small = false }) {
   return (
@@ -104,25 +101,141 @@ function Avatar({ initials, small = false }) {
   );
 }
 
+function FilePreview({ file, onRemove, disabled }) {
+  const [previewURL, setPreviewURL] = useState("");
+
+  useEffect(() => {
+    if (!file.type.startsWith("image/")) {
+      setPreviewURL("");
+      return undefined;
+    }
+
+    const url = URL.createObjectURL(file);
+    setPreviewURL(url);
+
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
+
+  const isImage = file.type.startsWith("image/");
+
+  return (
+    <div className="flex min-w-0 items-center gap-3 rounded-lg border border-line bg-surface p-2">
+      {isImage && previewURL ? (
+        <img
+          src={previewURL}
+          alt={`Preview of ${file.name}`}
+          className="h-11 w-11 shrink-0 rounded-md border border-line object-cover"
+        />
+      ) : (
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-line bg-hover text-muted">
+          {isImage ? <ImageIcon size={19} /> : <FileText size={19} />}
+        </div>
+      )}
+
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-xs font-medium text-text">{file.name}</p>
+        <p className="mt-1 text-[11px] text-muted">
+          {formatFileSize(file.size)}
+        </p>
+      </div>
+
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={onRemove}
+        aria-label={`Remove ${file.name}`}
+        title="Remove attachment"
+        className="rounded-md p-1.5 text-muted hover:bg-hover hover:text-text disabled:opacity-50"
+      >
+        <X size={15} />
+      </button>
+    </div>
+  );
+}
+
+function MessageAttachments({ attachments = [] }) {
+  if (!attachments.length) return null;
+
+  return (
+    <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+      {attachments.map((attachment, index) => {
+        const url = getAttachmentURL(attachment.url);
+        const isImage = attachment.mimetype?.startsWith("image/");
+
+        return (
+          <a
+            key={`${attachment.filename || attachment.originalName}-${index}`}
+            href={url}
+            target="_blank"
+            rel="noreferrer"
+            className="group flex min-w-0 items-center gap-3 rounded-lg border border-line bg-bg p-3 transition-colors hover:border-acc/50 hover:bg-hover"
+            title={`Open ${attachment.originalName}`}
+          >
+            {isImage ? (
+              <img
+                src={url}
+                alt={attachment.originalName || "Attached image"}
+                loading="lazy"
+                className="h-12 w-12 shrink-0 rounded-md border border-line object-cover"
+              />
+            ) : (
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-md border border-line bg-surface text-muted">
+                <FileText size={20} />
+              </div>
+            )}
+
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-xs font-medium text-text">
+                {attachment.originalName || "Attachment"}
+              </p>
+              <p className="mt-1 text-[11px] text-muted">
+                {formatFileSize(attachment.size)}
+              </p>
+            </div>
+
+            <Download
+              size={15}
+              className="shrink-0 text-muted group-hover:text-acc"
+            />
+          </a>
+        );
+      })}
+    </div>
+  );
+}
+
 function NewDiscussionModal({ onClose, onCreate }) {
   const [title, setTitle] = useState("");
-  const [project, setProject] = useState("Platform");
+  const [project, setProject] = useState("");
   const [taskId, setTaskId] = useState("");
   const [message, setMessage] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState("");
 
-  function handleSubmit(event) {
+  async function handleSubmit(event) {
     event.preventDefault();
 
-    if (!title.trim() || !message.trim()) return;
+    if (!title.trim() || !project.trim() || !message.trim() || submitting) {
+      return;
+    }
 
-    onCreate({
-      title: title.trim(),
-      project,
-      taskId: taskId.trim(),
-      message: message.trim(),
-    });
+    try {
+      setSubmitting(true);
+      setSubmitError("");
 
-    onClose();
+      const created = await onCreate({
+        title: title.trim(),
+        project: project.trim(),
+        taskId: taskId.trim(),
+        message: message.trim(),
+      });
+
+      if (created) onClose();
+    } catch (error) {
+      setSubmitError(error.message || "Could not create discussion.");
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -136,7 +249,7 @@ function NewDiscussionModal({ onClose, onCreate }) {
         onSubmit={handleSubmit}
         className="w-full max-w-lg rounded-xl border border-line bg-surface p-6"
       >
-        <div className="mb-5 flex items-start justify-between">
+        <div className="mb-5 flex items-start justify-between gap-3">
           <div>
             <h2 className="text-lg font-semibold text-text">
               Start a discussion
@@ -162,6 +275,7 @@ function NewDiscussionModal({ onClose, onCreate }) {
         <input
           autoFocus
           required
+          maxLength={200}
           value={title}
           onChange={(event) => setTitle(event.target.value)}
           placeholder="e.g. API response structure"
@@ -173,15 +287,14 @@ function NewDiscussionModal({ onClose, onCreate }) {
             <label className="mb-1.5 block text-sm font-medium text-text">
               Project
             </label>
-            <select
+            <input
+              required
+              maxLength={100}
               value={project}
               onChange={(event) => setProject(event.target.value)}
-              className="w-full rounded-lg border border-line bg-bg px-3 py-2.5 text-sm text-text outline-none focus:border-acc"
-            >
-              <option>Platform</option>
-              <option>Web App</option>
-              <option>API Service</option>
-            </select>
+              placeholder="e.g. DevSync"
+              className="w-full rounded-lg border border-line bg-bg px-3 py-2.5 text-sm text-text outline-none placeholder:text-muted focus:border-acc"
+            />
           </div>
 
           <div>
@@ -203,19 +316,26 @@ function NewDiscussionModal({ onClose, onCreate }) {
         <textarea
           required
           rows={4}
+          maxLength={5000}
           value={message}
           onChange={(event) => setMessage(event.target.value)}
           placeholder="What would you like the team to discuss?"
           className="mb-5 w-full resize-y rounded-lg border border-line bg-bg px-3 py-2.5 text-sm text-text outline-none placeholder:text-muted focus:border-acc"
         />
 
+        {submitError && (
+          <p role="alert" className="mb-4 text-sm text-red-500">
+            {submitError}
+          </p>
+        )}
+
         <div className="flex justify-end gap-2">
-          <Button variant="secondary" onClick={onClose}>
+          <Button type="button" variant="secondary" onClick={onClose}>
             Cancel
           </Button>
-          <Button type="submit">
+          <Button type="submit" disabled={submitting}>
             <Plus size={16} />
-            Create discussion
+            {submitting ? "Creating..." : "Create discussion"}
           </Button>
         </div>
       </form>
@@ -224,20 +344,31 @@ function NewDiscussionModal({ onClose, onCreate }) {
 }
 
 function DecisionModal({ thread, onClose, onSave }) {
-  const [title, setTitle] = useState("");
-  const [summary, setSummary] = useState("");
+  const [title, setTitle] = useState(thread.decision?.title || "");
+  const [summary, setSummary] = useState(thread.decision?.summary || "");
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState("");
 
-  function handleSubmit(event) {
+  async function handleSubmit(event) {
     event.preventDefault();
 
-    if (!title.trim() || !summary.trim()) return;
+    if (!title.trim() || !summary.trim() || submitting) return;
 
-    onSave(thread.id, {
-      title: title.trim(),
-      summary: summary.trim(),
-    });
+    try {
+      setSubmitting(true);
+      setSubmitError("");
 
-    onClose();
+      const saved = await onSave(thread.id, {
+        title: title.trim(),
+        summary: summary.trim(),
+      });
+
+      if (saved) onClose();
+    } catch (error) {
+      setSubmitError(error.message || "Could not save decision.");
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -251,10 +382,10 @@ function DecisionModal({ thread, onClose, onSave }) {
         onSubmit={handleSubmit}
         className="w-full max-w-md rounded-xl border border-line bg-surface p-6"
       >
-        <div className="mb-5 flex items-start justify-between">
+        <div className="mb-5 flex items-start justify-between gap-3">
           <div>
             <h2 className="text-lg font-semibold text-text">
-              Record a decision
+              {thread.decision ? "Update decision" : "Record a decision"}
             </h2>
             <p className="mt-1 text-sm text-muted">
               Preserve the outcome and reasoning from this discussion.
@@ -277,6 +408,7 @@ function DecisionModal({ thread, onClose, onSave }) {
         <input
           autoFocus
           required
+          maxLength={200}
           value={title}
           onChange={(event) => setTitle(event.target.value)}
           placeholder="What did the team decide?"
@@ -289,19 +421,26 @@ function DecisionModal({ thread, onClose, onSave }) {
         <textarea
           required
           rows={4}
+          maxLength={5000}
           value={summary}
           onChange={(event) => setSummary(event.target.value)}
           placeholder="Why was this approach chosen?"
           className="mb-5 w-full resize-y rounded-lg border border-line bg-bg px-3 py-2.5 text-sm text-text outline-none placeholder:text-muted focus:border-acc"
         />
 
+        {submitError && (
+          <p role="alert" className="mb-4 text-sm text-red-500">
+            {submitError}
+          </p>
+        )}
+
         <div className="flex justify-end gap-2">
-          <Button variant="secondary" onClick={onClose}>
+          <Button type="button" variant="secondary" onClick={onClose}>
             Cancel
           </Button>
-          <Button type="submit">
+          <Button type="submit" disabled={submitting}>
             <GitMerge size={16} />
-            Save decision
+            {submitting ? "Saving..." : "Save decision"}
           </Button>
         </div>
       </form>
@@ -310,13 +449,59 @@ function DecisionModal({ thread, onClose, onSave }) {
 }
 
 export default function Discussion() {
-  const [threads, setThreads] = useState(initialThreads);
-  const [activeThreadId, setActiveThreadId] = useState(1);
+  const [threads, setThreads] = useState([]);
+  const [activeThreadId, setActiveThreadId] = useState(null);
   const [search, setSearch] = useState("");
   const [message, setMessage] = useState("");
+  const [selectedFiles, setSelectedFiles] = useState([]);
   const [filter, setFilter] = useState("All");
   const [showNewDiscussion, setShowNewDiscussion] = useState(false);
   const [showDecisionModal, setShowDecisionModal] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [pageError, setPageError] = useState("");
+  const [sendingMessage, setSendingMessage] = useState(false);
+
+  const fileInputRef = useRef(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadDiscussions() {
+      try {
+        setLoading(true);
+        setPageError("");
+
+        const result = await discussionAPI.getAll();
+        if (cancelled) return;
+
+        const loadedThreads = (result.data || []).map(normalizeThread);
+        setThreads(loadedThreads);
+
+        setActiveThreadId((currentId) => {
+          if (
+            currentId &&
+            loadedThreads.some((thread) => thread.id === currentId)
+          ) {
+            return currentId;
+          }
+
+          return loadedThreads[0]?.id ?? null;
+        });
+      } catch (error) {
+        if (!cancelled) {
+          setPageError(error.message || "Failed to load discussions.");
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    loadDiscussions();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const activeThread = threads.find(
     (thread) => thread.id === activeThreadId
@@ -336,96 +521,212 @@ export default function Discussion() {
     return matchesSearch && matchesFilter;
   });
 
-  function createDiscussion(data) {
-    const nextId = Math.max(0, ...threads.map((thread) => thread.id)) + 1;
+  async function createDiscussion(data) {
+    const result = await discussionAPI.create(data);
+    const createdThread = normalizeThread(result.data);
 
-    const newThread = {
-      id: nextId,
-      title: data.title,
-      project: data.project,
-      taskId: data.taskId,
-      status: "Open",
-      messages: [
-        {
-          id: 1,
-          author: "Mansi Sinha",
-          initials: "MS",
-          time: "Just now",
-          text: data.message,
-        },
-      ],
-      decision: null,
-    };
+    setThreads((current) => [
+      createdThread,
+      ...current.filter((thread) => thread.id !== createdThread.id),
+    ]);
 
-    setThreads((current) => [newThread, ...current]);
-    setActiveThreadId(nextId);
+    setActiveThreadId(createdThread.id);
     setFilter("All");
     setSearch("");
+    setPageError("");
+
+    return true;
   }
 
-  function sendMessage(event) {
+  function handleFileSelection(event) {
+    const incomingFiles = Array.from(event.target.files || []);
+    event.target.value = "";
+
+    if (!incomingFiles.length) return;
+
+    const nextFiles = [...selectedFiles];
+    let error = "";
+
+    for (const file of incomingFiles) {
+      if (!isAllowedFile(file)) {
+        error = `${file.name}: only JPG, PNG, WebP, PDF, and TXT files are allowed.`;
+        break;
+      }
+
+      if (file.size > MAX_FILE_SIZE) {
+        error = `${file.name}: each file must be 5 MB or smaller.`;
+        break;
+      }
+
+      const alreadySelected = nextFiles.some(
+        (selected) =>
+          selected.name === file.name &&
+          selected.size === file.size &&
+          selected.lastModified === file.lastModified
+      );
+
+      if (alreadySelected) continue;
+
+      if (nextFiles.length >= MAX_FILES) {
+        error = "You can attach a maximum of 5 files per message.";
+        break;
+      }
+
+      nextFiles.push(file);
+    }
+
+    if (error) {
+      setPageError(error);
+      return;
+    }
+
+    setPageError("");
+    setSelectedFiles(nextFiles);
+  }
+
+  function removeSelectedFile(indexToRemove) {
+    setSelectedFiles((current) =>
+      current.filter((_, index) => index !== indexToRemove)
+    );
+  }
+
+  async function sendMessage(event) {
     event.preventDefault();
 
-    if (!message.trim() || !activeThread) return;
+    const text = message.trim();
 
-    const newMessage = {
-      id: Date.now(),
-      author: "Mansi Sinha",
-      initials: "MS",
-      time: "Just now",
-      text: message.trim(),
-    };
+    if (
+      (!text && selectedFiles.length === 0) ||
+      !activeThread ||
+      sendingMessage
+    ) {
+      return;
+    }
 
-    setThreads((current) =>
-      current.map((thread) =>
-        thread.id === activeThreadId
-          ? {
-              ...thread,
-              messages: [...thread.messages, newMessage],
-            }
-          : thread
-      )
-    );
+    try {
+      setSendingMessage(true);
+      setPageError("");
 
-    setMessage("");
+      let attachments = [];
+
+      if (selectedFiles.length > 0) {
+        const uploadResult = await uploadAPI.uploadFiles(selectedFiles);
+        attachments = uploadResult.data || [];
+      }
+
+      const result = await discussionAPI.addMessage(activeThread.id, {
+        text,
+        author: "Mansi Sinha",
+        initials: "MS",
+        attachments,
+      });
+
+      const updatedThread = normalizeThread(result.data);
+
+      setThreads((current) =>
+        current.map((thread) =>
+          thread.id === updatedThread.id ? updatedThread : thread
+        )
+      );
+
+      setMessage("");
+      setSelectedFiles([]);
+    } catch (error) {
+      setPageError(error.message || "Failed to send message or upload files.");
+    } finally {
+      setSendingMessage(false);
+    }
   }
 
-  function saveDecision(threadId, decision) {
-    setThreads((current) =>
-      current.map((thread) =>
-        thread.id === threadId
-          ? { ...thread, decision, status: "Resolved" }
-          : thread
-      )
+  async function saveDecision(threadId, decision) {
+    try {
+      setPageError("");
+
+      const result = await discussionAPI.update(threadId, { decision });
+      const updatedThread = normalizeThread(result.data);
+
+      setThreads((current) =>
+        current.map((thread) =>
+          thread.id === updatedThread.id ? updatedThread : thread
+        )
+      );
+
+      return true;
+    } catch (error) {
+      setPageError(error.message || "Failed to save decision.");
+      throw error;
+    }
+  }
+
+  async function toggleThreadStatus(threadId) {
+    const thread = threads.find((item) => item.id === threadId);
+    if (!thread) return;
+
+    const nextStatus = thread.status === "Open" ? "Resolved" : "Open";
+
+    try {
+      setPageError("");
+
+      const result = await discussionAPI.update(threadId, {
+        status: nextStatus,
+      });
+
+      const updatedThread = normalizeThread(result.data);
+
+      setThreads((current) =>
+        current.map((item) =>
+          item.id === updatedThread.id ? updatedThread : item
+        )
+      );
+    } catch (error) {
+      setPageError(error.message || "Failed to update discussion status.");
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="p-6 text-sm text-muted" role="status">
+        Loading discussions...
+      </div>
     );
   }
 
-  function toggleThreadStatus(threadId) {
-    setThreads((current) =>
-      current.map((thread) =>
-        thread.id === threadId
-          ? {
-              ...thread,
-              status: thread.status === "Open" ? "Resolved" : "Open",
-            }
-          : thread
-      )
+  if (pageError && threads.length === 0) {
+    return (
+      <div className="p-6" role="alert">
+        <p className="text-sm text-red-500">{pageError}</p>
+        <Button className="mt-3" onClick={() => window.location.reload()}>
+          Retry
+        </Button>
+      </div>
     );
   }
 
   return (
-    <div className="mx-auto flex h-full min-h-150 w-full max-w-[1600px] flex-col gap-5 pb-2">
-      {/* Page heading */}
+    <div className="mx-auto flex h-full min-h-150 w-full max-w-none flex-col gap-5 pb-2">
+      {pageError && (
+        <div
+          role="alert"
+          className="flex items-start justify-between gap-3 rounded-lg border border-red-500/20 bg-red-500/5 px-4 py-3 text-sm text-red-500"
+        >
+          <span>{pageError}</span>
+          <button
+            type="button"
+            aria-label="Dismiss error"
+            onClick={() => setPageError("")}
+            className="shrink-0"
+          >
+            <X size={16} />
+          </button>
+        </div>
+      )}
+
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
         <div>
-          <p className="mb-2 text-sm text-muted">
-            Workspace / Engineering
-          </p>
-
+          <p className="mb-2 text-sm text-muted">Workspace / Engineering</p>
           <h1 className="text-2xl font-semibold tracking-tight text-text sm:text-3xl">
             Discussion
           </h1>
-
           <p className="mt-2 text-sm text-muted">
             Conversations with the context behind your team's work.
           </p>
@@ -437,9 +738,7 @@ export default function Discussion() {
         </Button>
       </div>
 
-      {/* Discussion workspace */}
-      <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden rounded-xl border border-line bg-surface lg:grid-cols-[320px_minmax(0,1fr)]">
-        {/* Thread list */}
+      <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden rounded-xl border border-line bg-surface lg:grid-cols-[280px_minmax(0,1fr)]">
         <aside className="flex min-h-0 flex-col border-b border-line bg-side lg:border-b-0 lg:border-r">
           <div className="border-b border-line p-4">
             <div className="relative">
@@ -447,7 +746,6 @@ export default function Discussion() {
                 size={16}
                 className="absolute left-3 top-1/2 -translate-y-1/2 text-muted"
               />
-
               <input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
@@ -478,6 +776,11 @@ export default function Discussion() {
           <div className="min-h-0 flex-1 overflow-y-auto">
             {filteredThreads.map((thread) => {
               const isActive = thread.id === activeThreadId;
+              const lastMessage = thread.messages[thread.messages.length - 1];
+              const previewText = lastMessage
+                ? lastMessage.text ||
+                  `${lastMessage.attachments?.length || 0} attachment(s)`
+                : "No messages yet";
 
               return (
                 <button
@@ -485,9 +788,7 @@ export default function Discussion() {
                   type="button"
                   onClick={() => setActiveThreadId(thread.id)}
                   className={`w-full border-b border-line p-4 text-left transition-colors ${
-                    isActive
-                      ? "bg-hover"
-                      : "hover:bg-hover/60"
+                    isActive ? "bg-hover" : "hover:bg-hover/60"
                   }`}
                 >
                   <div className="flex items-start gap-3">
@@ -506,24 +807,19 @@ export default function Discussion() {
                         <p className="text-sm font-semibold leading-5 text-text">
                           {thread.title}
                         </p>
-
                         {thread.status === "Resolved" && (
-                          <Check
-                            size={15}
-                            className="shrink-0 text-acc"
-                          />
+                          <Check size={15} className="shrink-0 text-acc" />
                         )}
                       </div>
 
                       <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted">
-                        {thread.messages[thread.messages.length - 1]?.text}
+                        {previewText}
                       </p>
 
                       <div className="mt-3 flex flex-wrap items-center gap-2">
                         <span className="rounded-md border border-line bg-surface px-2 py-1 text-[10px] text-muted">
                           {thread.project}
                         </span>
-
                         {thread.taskId && (
                           <span className="font-mono text-[10px] text-muted">
                             {thread.taskId}
@@ -538,10 +834,7 @@ export default function Discussion() {
 
             {filteredThreads.length === 0 && (
               <div className="p-6 text-center">
-                <MessageSquare
-                  size={22}
-                  className="mx-auto text-muted"
-                />
+                <MessageSquare size={22} className="mx-auto text-muted" />
                 <p className="mt-3 text-sm font-medium text-text">
                   No discussions found
                 </p>
@@ -553,11 +846,9 @@ export default function Discussion() {
           </div>
         </aside>
 
-        {/* Active conversation */}
         <section className="flex min-h-125 min-w-0 flex-col">
           {activeThread ? (
             <>
-              {/* Thread header */}
               <div className="flex flex-col justify-between gap-3 border-b border-line p-4 sm:flex-row sm:items-start sm:p-5">
                 <div className="min-w-0">
                   <h2 className="text-base font-semibold text-text">
@@ -626,9 +917,8 @@ export default function Discussion() {
                 </div>
               </div>
 
-              {/* Message history */}
               <div className="min-h-0 flex-1 space-y-6 overflow-y-auto p-4 sm:p-6">
-                <div className="mx-auto max-w-3xl">
+                <div className="mx-auto max-w-4xl">
                   <div className="mb-6 text-center">
                     <span className="rounded-full border border-line bg-bg px-3 py-1.5 text-[11px] text-muted">
                       Discussion started · {activeThread.project}
@@ -652,14 +942,19 @@ export default function Discussion() {
                           </span>
                         </div>
 
-                        <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-text">
-                          {item.text}
-                        </p>
+                        {item.text && (
+                          <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-text">
+                            {item.text}
+                          </p>
+                        )}
+
+                        <MessageAttachments attachments={item.attachments} />
                       </div>
 
                       <button
                         type="button"
                         aria-label="Message options"
+                        title="Message options"
                         className="rounded-md p-1 text-muted hover:bg-hover hover:text-text"
                       >
                         <MoreHorizontal size={17} />
@@ -667,7 +962,6 @@ export default function Discussion() {
                     </div>
                   ))}
 
-                  {/* Recorded decision */}
                   {activeThread.decision && (
                     <div className="my-6 rounded-xl border border-amb/30 bg-ambSoft p-4">
                       <div className="flex items-start gap-3">
@@ -679,21 +973,16 @@ export default function Discussion() {
                           <p className="text-xs font-semibold uppercase tracking-wider text-amb">
                             Decision recorded
                           </p>
-
                           <h3 className="mt-2 text-sm font-semibold text-text">
                             {activeThread.decision.title}
                           </h3>
-
                           <p className="mt-1 text-sm leading-6 text-text">
                             {activeThread.decision.summary}
                           </p>
-
                           <button
                             type="button"
                             className="mt-3 text-xs font-medium text-amb underline underline-offset-2"
-                            onClick={() => {
-                              setShowDecisionModal(true);
-                            }}
+                            onClick={() => setShowDecisionModal(true)}
                           >
                             Update decision
                           </button>
@@ -704,7 +993,6 @@ export default function Discussion() {
                 </div>
               </div>
 
-              {/* Composer */}
               <form
                 onSubmit={sendMessage}
                 className="border-t border-line bg-surface p-4 sm:p-5"
@@ -716,7 +1004,7 @@ export default function Discussion() {
                   </div>
                 )}
 
-                <div className="mx-auto max-w-3xl rounded-xl border border-line bg-bg p-3 focus-within:border-acc">
+                <div className="mx-auto max-w-4xl rounded-xl border border-line bg-bg p-3 focus-within:border-acc">
                   <textarea
                     value={message}
                     onChange={(event) => setMessage(event.target.value)}
@@ -731,27 +1019,61 @@ export default function Discussion() {
                       }
                     }}
                     rows={2}
+                    maxLength={5000}
                     placeholder="Write a message... (Enter to send, Shift+Enter for a new line)"
                     aria-label="Write a message"
                     className="w-full resize-none bg-transparent text-sm leading-6 text-text outline-none placeholder:text-muted"
                   />
 
+                  {selectedFiles.length > 0 && (
+                    <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      {selectedFiles.map((file, index) => (
+                        <FilePreview
+                          key={`${file.name}-${file.size}-${file.lastModified}`}
+                          file={file}
+                          disabled={sendingMessage}
+                          onRemove={() => removeSelectedFile(index)}
+                        />
+                      ))}
+                    </div>
+                  )}
+
                   <div className="mt-2 flex items-center justify-between border-t border-line pt-3">
-                    <button
-                      type="button"
-                      aria-label="Attach file (not available yet)"
-                      title="File attachments are coming later"
-                      className="rounded-md p-1.5 text-muted"
-                    >
-                      <Paperclip size={17} />
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        multiple
+                        accept=".jpg,.jpeg,.png,.webp,.pdf,.txt,image/jpeg,image/png,image/webp,application/pdf,text/plain"
+                        className="hidden"
+                        onChange={handleFileSelection}
+                      />
+
+                      <button
+                        type="button"
+                        disabled={sendingMessage || selectedFiles.length >= MAX_FILES}
+                        onClick={() => fileInputRef.current?.click()}
+                        aria-label="Attach files"
+                        title="Attach up to 5 files (5 MB each)"
+                        className="rounded-md p-1.5 text-muted hover:bg-hover hover:text-text disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        <Paperclip size={17} />
+                      </button>
+
+                      <span className="text-[11px] text-muted">
+                        {selectedFiles.length}/{MAX_FILES} files · 5 MB max each
+                      </span>
+                    </div>
 
                     <Button
                       type="submit"
                       size="sm"
-                      disabled={!message.trim()}
+                      disabled={
+                        (!message.trim() && selectedFiles.length === 0) ||
+                        sendingMessage
+                      }
                     >
-                      Send
+                      {sendingMessage ? "Uploading..." : "Send"}
                       <Send size={14} />
                     </Button>
                   </div>
@@ -767,7 +1089,6 @@ export default function Discussion() {
               <h2 className="mt-4 text-base font-semibold text-text">
                 Select a discussion
               </h2>
-
               <p className="mt-2 max-w-xs text-sm leading-6 text-muted">
                 Choose a conversation from the list or start a new one.
               </p>
