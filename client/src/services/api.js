@@ -1,3 +1,4 @@
+
 const API_BASE_URL = "http://localhost:5000/api";
 const API_ORIGIN = API_BASE_URL.replace(/\/api$/, "");
 
@@ -63,6 +64,42 @@ export const discussionAPI = {
     request(`/discussions/${id}`, {
       method: "PUT",
       body: JSON.stringify(updates),
+    }),
+};
+
+// Standalone Decision collection API
+export const decisionAPI = {
+  getAll: () => request("/decisions"),
+
+  getTrash: () => request("/decisions/trash"),
+
+  create: (decision) =>
+    request("/decisions", {
+      method: "POST",
+      body: JSON.stringify(decision),
+    }),
+
+  updateStatus: (id, lifecycleStatus) =>
+    request(`/decisions/${id}/status`, {
+      method: "PATCH",
+      body: JSON.stringify({ lifecycleStatus }),
+    }),
+
+  supersede: (id, replacementDecisionId) =>
+    request(`/decisions/${id}/supersede`, {
+      method: "PATCH",
+      body: JSON.stringify({ replacementDecisionId }),
+    }),
+
+  delete: (id, deletedBy = "Unknown") =>
+    request(`/decisions/${id}`, {
+      method: "DELETE",
+      body: JSON.stringify({ deletedBy }),
+    }),
+
+  restore: (id) =>
+    request(`/decisions/${id}/restore`, {
+      method: "POST",
     }),
 };
 

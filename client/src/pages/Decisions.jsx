@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 
 import Button from "../components/ui/Button";
-import { discussionAPI } from "../services/api";
+import { decisionAPI, discussionAPI } from "../services/api";
 
 function formatDate(value) {
   if (!value) return "Date unavailable";
@@ -31,27 +31,39 @@ function formatDate(value) {
   });
 }
 
-function getDecisionId(discussionId) {
-  if (!discussionId) return "DEC-UNKNOWN";
+function getDecisionId(databaseId) {
+  if (!databaseId) return "DEC-UNKNOWN";
 
-  return `DEC-${String(discussionId).slice(-6).toUpperCase()}`;
+  return `DEC-${String(databaseId).slice(-6).toUpperCase()}`;
 }
 
-function normalizeDecision(discussion) {
-  if (!discussion?.decision) return null;
+function normalizeDecision(decision, discussions = []) {
+  if (!decision) return null;
+
+  const discussionId =
+    typeof decision.discussionId === "object"
+      ? decision.discussionId?._id || ""
+      : decision.discussionId || "";
+
+  const sourceDiscussion = discussions.find(
+    (discussion) =>
+      String(discussion._id || discussion.id) === String(discussionId)
+  );
 
   return {
-    id: getDecisionId(discussion._id || discussion.id),
-    discussionId: discussion._id || discussion.id,
-    discussionTitle: discussion.title || "Untitled discussion",
-    title: discussion.decision.title || "Untitled decision",
-    summary: discussion.decision.summary || "",
-    context: discussion.decision.context || "",
-    project: discussion.project || "Unassigned",
-    taskId: discussion.taskId || "",
-    author: "Workspace member",
-    date: formatDate(discussion.updatedAt || discussion.createdAt),
-    status: discussion.decision.status || "Accepted",
+    id: getDecisionId(decision._id || decision.id),
+    databaseId: String(decision._id || decision.id || ""),
+    discussionId,
+    discussionTitle: sourceDiscussion?.title || "Linked discussion",
+    title: decision.title || "Untitled decision",
+    summary: decision.summary || "",
+    context: decision.context || "",
+    project: decision.project || "Unassigned",
+    taskId: decision.taskId || "",
+    author: decision.createdBy || "Workspace member",
+    date: formatDate(decision.createdAt || decision.updatedAt),
+    status: decision.lifecycleStatus || "Accepted",
+    supersededBy: decision.supersededBy || null,
   };
 }
 
@@ -281,35 +293,44 @@ export default function Decisions() {
   const [projectFilter, setProjectFilter] = useState("All projects");
   const [showModal, setShowModal] = useState(false);
   const [selectedDecisionId, setSelectedDecisionId] = useState("");
+  const [showDecisionDetail, setShowDecisionDetail] = useState(false);
   const [loading, setLoading] = useState(true);
   const [pageError, setPageError] = useState("");
+  const [savingStatus, setSavingStatus] = useState(false);
 
   const loadDecisions = useCallback(async () => {
     setLoading(true);
     setPageError("");
 
     try {
-      const response = await discussionAPI.getAll();
-      const discussions = getResponseData(response);
+      const [decisionResponse, discussionResponse] = await Promise.all([
+        decisionAPI.getAll(),
+        discussionAPI.getAll(),
+      ]);
 
-      if (!Array.isArray(discussions)) {
-        throw new Error(
-          "The server returned an unexpected discussions response."
-        );
+      const savedRecords = getResponseData(decisionResponse);
+      const discussions = getResponseData(discussionResponse);
+
+      if (!Array.isArray(savedRecords) || !Array.isArray(discussions)) {
+        throw new Error("The server returned an unexpected decisions response.");
       }
 
-      const savedDecisions = discussions
-        .map(normalizeDecision)
-        .filter(Boolean);
+      const savedDecisions = savedRecords
+        .map((decision) => normalizeDecision(decision, discussions))
+        .filter((decision) => decision && decision.databaseId);
 
       setDecisions(savedDecisions);
 
       setSelectedDecisionId((currentId) => {
-        if (savedDecisions.some((decision) => decision.id === currentId)) {
+        if (
+          savedDecisions.some(
+            (decision) => decision.databaseId === currentId
+          )
+        ) {
           return currentId;
         }
 
-        return savedDecisions[0]?.id || "";
+        return savedDecisions[0]?.databaseId || "";
       });
     } catch (err) {
       setPageError(
@@ -360,11 +381,12 @@ export default function Decisions() {
   }, [decisions, search, projectFilter]);
 
   const selectedDecision =
-    filteredDecisions.find((decision) => decision.id === selectedDecisionId) ||
-    filteredDecisions[0];
+    filteredDecisions.find(
+      (decision) => decision.databaseId === selectedDecisionId
+    ) || filteredDecisions[0];
 
   async function createDecision(data) {
-    // Create the discussion and its opening message first.
+    // Create a source discussion first so the decision keeps its history link.
     const discussionResponse = await discussionAPI.create({
       title: `Decision: ${data.title}`,
       project: data.project,
@@ -384,41 +406,99 @@ export default function Decisions() {
       );
     }
 
-    // Save the decision inside the newly created discussion.
-    const decisionResponse = await discussionAPI.update(discussionId, {
-      decision: {
-        title: data.title,
-        summary: data.summary,
-        context: data.context,
-      },
+    // Save the decision as its own document in the Decision collection.
+    const decisionResponse = await decisionAPI.create({
+      title: data.title,
+      summary: data.summary,
+      context: data.context,
+      project: data.project,
+      taskId: data.taskId,
+      discussionId,
+      createdBy: "Mansi Sinha",
     });
 
-    const updatedDiscussion = getResponseData(decisionResponse);
+    const savedRecord = getResponseData(decisionResponse);
 
-    if (!updatedDiscussion?.decision) {
+    if (!savedRecord?._id && !savedRecord?.id) {
       throw new Error(
-        "The discussion was created, but the decision was not returned. Refresh the page to check its status."
+        "The discussion was created, but the standalone decision was not returned."
       );
     }
 
-    const newDecision = normalizeDecision(updatedDiscussion);
-
-    if (!newDecision) {
-      throw new Error("The server could not return the saved decision.");
-    }
+    const newDecision = normalizeDecision(
+      {
+        ...savedRecord,
+        discussionId,
+      },
+      [
+        {
+          ...createdDiscussion,
+          _id: discussionId,
+          title: createdDiscussion.title || `Decision: ${data.title}`,
+        },
+      ]
+    );
 
     setDecisions((current) => [
       newDecision,
-      ...current.filter((item) => item.id !== newDecision.id),
+      ...current.filter(
+        (item) => item.databaseId !== newDecision.databaseId
+      ),
     ]);
 
-    setSelectedDecisionId(newDecision.id);
+    setSelectedDecisionId(newDecision.databaseId);
+    setShowDecisionDetail(true);
     setSearch("");
     setProjectFilter("All projects");
     setPageError("");
   }
 
-  return (
+  async function changeDecisionStatus(lifecycleStatus) {
+    if (
+      !selectedDecision?.databaseId ||
+      lifecycleStatus === selectedDecision.status ||
+      savingStatus
+    ) {
+      return;
+    }
+
+    try {
+      setSavingStatus(true);
+      setPageError("");
+
+      const response = await decisionAPI.updateStatus(
+        selectedDecision.databaseId,
+        lifecycleStatus
+      );
+
+      const updatedRecord = getResponseData(response);
+
+      const updatedDecision = normalizeDecision({
+        ...updatedRecord,
+        discussionId:
+          typeof updatedRecord.discussionId === "object"
+            ? updatedRecord.discussionId?._id
+            : updatedRecord.discussionId || selectedDecision.discussionId,
+      });
+
+      setDecisions((current) =>
+        current.map((decision) =>
+          decision.databaseId === updatedDecision.databaseId
+            ? {
+                ...decision,
+                ...updatedDecision,
+                discussionTitle: decision.discussionTitle,
+              }
+            : decision
+        )
+      );
+    } catch (err) {
+      setPageError(err.message || "Could not update the decision status.");
+    } finally {
+      setSavingStatus(false);
+    }
+  }
+    return (
     <div className="mx-auto w-full max-w-[1600px] space-y-6 pb-8">
       {/* Header */}
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
@@ -522,7 +602,14 @@ export default function Decisions() {
       </div>
 
       {/* Decision list and detail */}
-      <div className="grid grid-cols-1 items-start gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.85fr)]">
+      <div
+        className={`grid grid-cols-1 items-start gap-5 ${
+          showDecisionDetail
+            ? "lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]"
+            : ""
+        }`}
+      >
+        {/* Decision list */}
         <section className="overflow-hidden rounded-xl border border-line bg-surface">
           <div className="flex items-center justify-between border-b border-line px-5 py-4">
             <h2 className="text-sm font-semibold text-text">All decisions</h2>
@@ -532,232 +619,286 @@ export default function Decisions() {
             </span>
           </div>
 
-          <div className="divide-y divide-line">
-            {loading ? (
-              <div className="flex min-h-56 flex-col items-center justify-center p-8 text-center">
-                <LoaderCircle size={24} className="animate-spin text-muted" />
-                <p className="mt-3 text-sm text-muted">
-                  Loading saved decisions...
-                </p>
-              </div>
-            ) : (
-              <>
-                {filteredDecisions.map((decision) => {
-                  const isSelected = selectedDecision?.id === decision.id;
-
-                  return (
-                    <button
-                      key={decision.id}
-                      type="button"
-                      onClick={() => setSelectedDecisionId(decision.id)}
-                      className={`w-full p-5 text-left transition-colors ${
-                        isSelected ? "bg-hover" : "hover:bg-hover/60"
-                      }`}
-                    >
-                      <div className="flex items-start gap-3">
-                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-amb/30 bg-ambSoft text-amb">
-                          <GitMerge size={18} />
-                        </div>
-
-                        <div className="min-w-0 flex-1">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="font-mono text-[11px] text-muted">
-                              {decision.id}
-                            </span>
-
-                            <span className="rounded-md border border-amb/30 bg-ambSoft px-2 py-0.5 text-[10px] font-medium text-amb">
-                              {decision.status}
-                            </span>
-                          </div>
-
-                          <h3 className="mt-2 text-sm font-semibold leading-5 text-text">
-                            {decision.title}
-                          </h3>
-
-                          <p className="mt-1.5 line-clamp-2 text-sm leading-5 text-muted">
-                            {decision.summary}
-                          </p>
-
-                          <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-muted">
-                            <span>{decision.project}</span>
-
-                            {decision.taskId && (
-                              <span className="flex items-center gap-1 font-mono">
-                                <Link2 size={12} />
-                                {decision.taskId}
-                              </span>
-                            )}
-
-                            <span className="flex items-center gap-1">
-                              <CalendarDays size={12} />
-                              {decision.date}
-                            </span>
-                          </div>
-                        </div>
-
-                        <ArrowUpRight
-                          size={16}
-                          className="shrink-0 text-muted"
-                        />
-                      </div>
-                    </button>
-                  );
-                })}
-
-                {filteredDecisions.length === 0 && (
-                  <div className="p-10 text-center">
-                    <GitMerge size={24} className="mx-auto text-muted" />
-
-                    <p className="mt-3 text-sm font-medium text-text">
-                      {decisions.length === 0
-                        ? "No decisions recorded yet"
-                        : "No decisions found"}
-                    </p>
-
-                    <p className="mt-1 text-sm text-muted">
-                      {decisions.length === 0
-                        ? "Record a decision to save it to your workspace."
-                        : "Try changing your search or project filter."}
-                    </p>
-
-                    {decisions.length === 0 && (
-                      <button
-                        type="button"
-                        onClick={() => setShowModal(true)}
-                        className="mt-4 inline-flex items-center gap-2 text-sm font-medium text-acc hover:underline"
-                      >
-                        <Plus size={15} />
-                        Record your first decision
-                      </button>
-                    )}
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        </section>
-
-        {/* Selected decision detail */}
-        <section className="rounded-xl border border-line bg-surface p-5 sm:p-6">
-          {selectedDecision && !loading ? (
-            <>
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-amb/30 bg-ambSoft text-amb">
-                  <GitMerge size={21} />
-                </div>
-
-                <span className="rounded-md border border-amb/30 bg-ambSoft px-2.5 py-1 text-xs font-medium text-amb">
-                  {selectedDecision.status}
-                </span>
+          {loading ? (
+            <div className="flex items-center justify-center gap-2 p-12 text-sm text-muted">
+              <LoaderCircle size={18} className="animate-spin" />
+              Loading decisions...
+            </div>
+          ) : filteredDecisions.length === 0 ? (
+            <div className="flex flex-col items-center px-6 py-12 text-center">
+              <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-xl border border-line bg-bg text-muted">
+                <GitMerge size={21} />
               </div>
 
-              <p className="mt-5 font-mono text-xs text-muted">
-                {selectedDecision.id}
+              <h3 className="text-sm font-semibold text-text">
+                {search || projectFilter !== "All projects"
+                  ? "No matching decisions"
+                  : "No decisions yet"}
+              </h3>
+
+              <p className="mt-2 max-w-sm text-sm leading-5 text-muted">
+                {search || projectFilter !== "All projects"
+                  ? "Try changing your search or project filter."
+                  : "Record your first decision to keep important engineering choices and their reasoning in one place."}
               </p>
 
-              <h2 className="mt-2 text-xl font-semibold leading-7 text-text">
-                {selectedDecision.title}
-              </h2>
-
-              <div className="mt-4 flex flex-wrap items-center gap-3 text-xs text-muted">
-                <span className="flex items-center gap-1.5">
-                  <UserRound size={14} />
-                  {selectedDecision.author}
-                </span>
-
-                <span className="flex items-center gap-1.5">
-                  <CalendarDays size={14} />
-                  {selectedDecision.date}
-                </span>
-              </div>
-
-              <div className="my-6 border-t border-line" />
-
-              <div>
-                <h3 className="text-xs font-semibold uppercase tracking-wider text-muted">
-                  Outcome
-                </h3>
-
-                <p className="mt-3 text-sm leading-6 text-text">
-                  {selectedDecision.summary}
-                </p>
-              </div>
-
-              <div className="mt-6 rounded-xl border border-amb/30 bg-ambSoft p-4">
-                <h3 className="text-xs font-semibold uppercase tracking-wider text-amb">
-                  Context and reasoning
-                </h3>
-
-                <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-text">
-                  {selectedDecision.context || "No additional context provided."}
-                </p>
-              </div>
-
-              <div className="mt-6">
-                <h3 className="text-xs font-semibold uppercase tracking-wider text-muted">
-                  Connected work
-                </h3>
-
-                <div className="mt-3 rounded-lg border border-line bg-bg p-3">
-                  <p className="text-xs text-muted">Project</p>
-                  <p className="mt-1 text-sm font-medium text-text">
-                    {selectedDecision.project}
-                  </p>
-
-                  {selectedDecision.taskId && (
-                    <>
-                      <div className="my-3 border-t border-line" />
-
-                      <p className="text-xs text-muted">Related task ID</p>
-                      <p className="mt-1 flex items-center gap-2 font-mono text-sm text-text">
-                        <Link2 size={14} />
-                        {selectedDecision.taskId}
-                      </p>
-                    </>
-                  )}
-
-                  <div className="my-3 border-t border-line" />
-
-                  <p className="text-xs text-muted">Source discussion</p>
-                  <p className="mt-1 flex items-start gap-2 text-sm text-text">
-                    <MessageSquare
-                      size={15}
-                      className="mt-0.5 shrink-0 text-muted"
-                    />
-                    <span>{selectedDecision.discussionTitle}</span>
-                  </p>
-                </div>
-              </div>
-            </>
-          ) : (
-            <div className="flex min-h-72 flex-col items-center justify-center text-center">
-              {loading ? (
-                <>
-                  <LoaderCircle
-                    size={25}
-                    className="animate-spin text-muted"
-                  />
-                  <p className="mt-4 text-sm text-muted">
-                    Loading decision details...
-                  </p>
-                </>
-              ) : (
-                <>
-                  <GitMerge size={25} className="text-muted" />
-
-                  <h2 className="mt-4 text-sm font-semibold text-text">
-                    Select a decision
-                  </h2>
-
-                  <p className="mt-2 max-w-xs text-sm leading-6 text-muted">
-                    Choose a decision from the list to inspect its outcome and
-                    reasoning.
-                  </p>
-                </>
+              {!search && projectFilter === "All projects" && (
+                <Button
+                  className="mt-4"
+                  onClick={() => setShowModal(true)}
+                >
+                  <Plus size={16} />
+                  Record decision
+                </Button>
               )}
+            </div>
+          ) : (
+            <div className="divide-y divide-line">
+              {filteredDecisions.map((decision) => {
+                const isSelected =
+                  selectedDecision?.databaseId === decision.databaseId;
+
+                return (
+                  <button
+                    key={decision.databaseId}
+                    type="button"
+                    onClick={() => {
+                      setSelectedDecisionId(decision.databaseId);
+                      setShowDecisionDetail(true);
+                    }}
+                    className={`group w-full px-5 py-4 text-left transition-colors hover:bg-hover ${
+                      isSelected && showDecisionDetail ? "bg-hover" : ""
+                    }`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-amb/30 bg-ambSoft text-amb">
+                        <GitMerge size={17} />
+                      </div>
+
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-mono text-[11px] text-muted">
+                            {decision.id}
+                          </span>
+
+                          <span
+                            className={`rounded-md border px-2 py-0.5 text-[11px] font-medium ${
+                              decision.status === "Accepted"
+                                ? "border-acc/25 bg-acc/10 text-acc"
+                                : decision.status === "Superseded"
+                                  ? "border-amb/30 bg-ambSoft text-amb"
+                                  : "border-line bg-bg text-muted"
+                            }`}
+                          >
+                            {decision.status}
+                          </span>
+                        </div>
+
+                        <h3 className="mt-2 line-clamp-2 text-sm font-semibold leading-5 text-text">
+                          {decision.title}
+                        </h3>
+
+                        <p className="mt-1 line-clamp-2 text-sm leading-5 text-muted">
+                          {decision.summary}
+                        </p>
+
+                        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-muted">
+                          <span className="inline-flex items-center gap-1.5">
+                            <GitMerge size={13} />
+                            {decision.project}
+                          </span>
+
+                          <span className="inline-flex items-center gap-1.5">
+                            <CalendarDays size={13} />
+                            {decision.date}
+                          </span>
+
+                          {decision.taskId && (
+                            <span className="inline-flex items-center gap-1.5">
+                              <Link2 size={13} />
+                              {decision.taskId}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <ArrowUpRight
+                        size={17}
+                        className="mt-1 shrink-0 text-muted transition-colors group-hover:text-acc"
+                      />
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           )}
         </section>
+        {/* Decision detail panel */}
+        {showDecisionDetail && (
+          <section className="min-w-0 overflow-hidden rounded-xl border border-line bg-surface">
+            <div className="flex items-center justify-between gap-3 border-b border-line px-5 py-4">
+              <div>
+                <h2 className="text-sm font-semibold text-text">
+                  Decision details
+                </h2>
+                <p className="mt-1 text-xs text-muted">
+                  Outcome, context, and status
+                </p>
+              </div>
+
+              <Button
+                variant="secondary"
+                onClick={() => setShowDecisionDetail(false)}
+              >
+                Done
+              </Button>
+            </div>
+
+            {!selectedDecision ? (
+              <div className="p-8 text-center text-sm text-muted">
+                Select a decision from the list to see its details.
+              </div>
+            ) : (
+              <div className="space-y-6 p-5">
+                <div>
+                  <div className="mb-3 flex flex-wrap items-center gap-2">
+                    <span className="font-mono text-xs text-muted">
+                      {selectedDecision.id}
+                    </span>
+
+                    <span
+                      className={`rounded-md border px-2 py-1 text-xs font-medium ${
+                        selectedDecision.status === "Accepted"
+                          ? "border-acc/25 bg-acc/10 text-acc"
+                          : selectedDecision.status === "Superseded"
+                            ? "border-amb/30 bg-ambSoft text-amb"
+                            : "border-line bg-bg text-muted"
+                      }`}
+                    >
+                      {selectedDecision.status}
+                    </span>
+                  </div>
+
+                  <h3 className="text-xl font-semibold leading-7 tracking-tight text-text">
+                    {selectedDecision.title}
+                  </h3>
+
+                  <p className="mt-3 text-sm leading-6 text-muted">
+                    {selectedDecision.summary}
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div className="rounded-lg border border-line bg-bg p-3">
+                    <p className="text-xs text-muted">Project</p>
+                    <p className="mt-1 break-words text-sm font-medium text-text">
+                      {selectedDecision.project}
+                    </p>
+                  </div>
+
+                  <div className="rounded-lg border border-line bg-bg p-3">
+                    <p className="text-xs text-muted">Related task</p>
+                    <p className="mt-1 break-words text-sm font-medium text-text">
+                      {selectedDecision.taskId || "No task linked"}
+                    </p>
+                  </div>
+
+                  <div className="rounded-lg border border-line bg-bg p-3">
+                    <p className="text-xs text-muted">Recorded on</p>
+                    <p className="mt-1 text-sm font-medium text-text">
+                      {selectedDecision.date}
+                    </p>
+                  </div>
+
+                  <div className="rounded-lg border border-line bg-bg p-3">
+                    <p className="text-xs text-muted">Recorded by</p>
+                    <p className="mt-1 break-words text-sm font-medium text-text">
+                      {selectedDecision.author}
+                    </p>
+                  </div>
+                </div>
+
+                <div>
+                  <h4 className="mb-2 text-sm font-semibold text-text">
+                    Context and reasoning
+                  </h4>
+
+                  <div className="whitespace-pre-wrap break-words rounded-lg border border-line bg-bg p-4 text-sm leading-6 text-muted">
+                    {selectedDecision.context ||
+                      "No additional context was recorded."}
+                  </div>
+                </div>
+
+                <div>
+                  <h4 className="mb-2 text-sm font-semibold text-text">
+                    Decision status
+                  </h4>
+
+                  <p className="mb-3 text-sm leading-5 text-muted">
+                    Update the lifecycle status when the team's decision
+                    changes.
+                  </p>
+
+                  <select
+                    value={selectedDecision.status}
+                    onChange={(event) =>
+                      changeDecisionStatus(event.target.value)
+                    }
+                    disabled={savingStatus}
+                    aria-label="Update decision status"
+                    className="h-10 w-full rounded-lg border border-line bg-bg px-3 text-sm text-text outline-none focus:border-acc disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <option value="Accepted">Accepted</option>
+                    <option value="Superseded">Superseded</option>
+                    <option value="Archived">Archived</option>
+                  </select>
+
+                  {savingStatus && (
+                    <p className="mt-2 flex items-center gap-2 text-xs text-muted">
+                      <LoaderCircle
+                        size={14}
+                        className="animate-spin"
+                      />
+                      Updating status...
+                    </p>
+                  )}
+                </div>
+
+                <div className="rounded-lg border border-line p-4">
+                  <div className="flex items-start gap-3">
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-line bg-bg text-muted">
+                      <MessageSquare size={17} />
+                    </div>
+
+                    <div className="min-w-0">
+                      <h4 className="text-sm font-medium text-text">
+                        Discussion history
+                      </h4>
+
+                      <p className="mt-1 text-sm leading-5 text-muted">
+                        This decision is linked to its source discussion so
+                        your team can preserve the context behind the outcome.
+                      </p>
+
+                      <p className="mt-2 break-words font-mono text-xs text-muted">
+                        {selectedDecision.discussionTitle}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex justify-end border-t border-line pt-4">
+                  <Button
+                    variant="secondary"
+                    onClick={() => setShowDecisionDetail(false)}
+                  >
+                    Done
+                  </Button>
+                </div>
+              </div>
+            )}
+          </section>
+        )}
       </div>
 
       {showModal && (

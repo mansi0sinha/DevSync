@@ -232,11 +232,11 @@ router.put("/:id", async (req, res) => {
       });
     }
 
-    const discussion = await Discussion.findByIdAndUpdate(
-      req.params.id,
-      { $set: updates },
-      { new: true, runValidators: true }
-    );
+  const discussion = await Discussion.findByIdAndUpdate(
+  req.params.id,
+  { $set: updates },
+  { returnDocument: "after", runValidators: true }
+);
 
     if (!discussion) {
       return res.status(404).json({

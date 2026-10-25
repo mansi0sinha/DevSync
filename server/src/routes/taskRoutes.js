@@ -59,14 +59,14 @@ router.put("/:id", async (req, res) => {
   try {
     const { title, description, status, priority, dueDate } = req.body;
 
-    const task = await Task.findByIdAndUpdate(
-      req.params.id,
-      { title, description, status, priority, dueDate },
-      {
-        new: true,
-        runValidators: true,
-      }
-    );
+  const task = await Task.findByIdAndUpdate(
+  req.params.id,
+  { title, description, status, priority, dueDate },
+  {
+    returnDocument: "after",
+    runValidators: true,
+  }
+);
 
     if (!task) {
       return res.status(404).json({

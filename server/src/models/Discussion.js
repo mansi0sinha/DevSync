@@ -80,6 +80,33 @@ const decisionSchema = new mongoose.Schema(
       default: "",
       maxlength: [5000, "Decision context cannot exceed 5000 characters"],
     },
+
+    // Decision lifecycle
+    lifecycleStatus: {
+      type: String,
+      enum: ["Accepted", "Superseded", "Archived"],
+      default: "Accepted",
+    },
+
+    // Reference to the decision that replaced this one.
+    // Uses a Discussion document ID because decisions are embedded
+    // inside Discussion documents in our current architecture.
+    supersededBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Discussion",
+      default: null,
+    },
+
+    // Soft-delete / Recycle Bin information
+    deletedAt: {
+      type: Date,
+      default: null,
+    },
+    deletedBy: {
+      type: String,
+      default: null,
+      trim: true,
+    },
   },
   { _id: false }
 );

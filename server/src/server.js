@@ -1,12 +1,13 @@
 const express = require("express");
 const cors = require("cors");
 require("dotenv").config();
+const app = express();
+const PORT = process.env.PORT || 5000;
 const connectDB = require("./config/db");
 const taskRoutes = require("./routes/taskRoutes");
 const discussionRoutes = require("./routes/discussionRoutes");
-const app = express();
-const PORT = process.env.PORT || 5000;
 const uploadRoutes = require("./routes/uploadRoutes");
+const decisionRoutes = require("./routes/decisionRoutes");
 const path = require("path");
 app.use(cors({ origin: "http://localhost:5173" }));
 app.use(express.json());
@@ -35,6 +36,7 @@ app.use(
   "/uploads",
   express.static(path.join(__dirname, "../uploads"))
 );
+app.use("/api/decisions", decisionRoutes);
 // Connect to MongoDB, then start server
 connectDB()
   .then(() => {
