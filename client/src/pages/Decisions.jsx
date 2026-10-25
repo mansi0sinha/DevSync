@@ -1,3 +1,4 @@
+
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   GitMerge,
@@ -6,16 +7,21 @@ import {
   ArrowUpRight,
   Link2,
   CalendarDays,
-  UserRound,
   X,
   Filter,
   MessageSquare,
   LoaderCircle,
   AlertCircle,
+  CheckCircle2,
+  ClipboardList,
 } from "lucide-react";
 
 import Button from "../components/ui/Button";
-import { decisionAPI, discussionAPI } from "../services/api";
+import {
+  decisionAPI,
+  discussionAPI,
+  taskAPI,
+} from "../services/api";
 
 function formatDate(value) {
   if (!value) return "Date unavailable";
@@ -37,18 +43,38 @@ function getDecisionId(databaseId) {
   return `DEC-${String(databaseId).slice(-6).toUpperCase()}`;
 }
 
-function normalizeDecision(decision, discussions = []) {
+function getResponseData(response) {
+  return response?.data ?? response;
+}
+
+function normalizeDecision(decision, discussions = [], tasks = []) {
   if (!decision) return null;
 
-  const discussionId =
+  const rawDiscussionId =
     typeof decision.discussionId === "object"
       ? decision.discussionId?._id || ""
       : decision.discussionId || "";
 
+  const discussionId = String(rawDiscussionId);
+
   const sourceDiscussion = discussions.find(
     (discussion) =>
-      String(discussion._id || discussion.id) === String(discussionId)
+      String(discussion._id || discussion.id) === discussionId
   );
+
+  const rawLinkedTask = decision.linkedTask;
+
+  const linkedTaskId =
+    rawLinkedTask && typeof rawLinkedTask === "object"
+      ? String(rawLinkedTask._id || rawLinkedTask.id || "")
+      : String(rawLinkedTask || "");
+
+  const linkedTask =
+    rawLinkedTask && typeof rawLinkedTask === "object"
+      ? rawLinkedTask
+      : tasks.find(
+          (task) => String(task._id || task.id) === linkedTaskId
+        ) || null;
 
   return {
     id: getDecisionId(decision._id || decision.id),
@@ -60,6 +86,8 @@ function normalizeDecision(decision, discussions = []) {
     context: decision.context || "",
     project: decision.project || "Unassigned",
     taskId: decision.taskId || "",
+    linkedTaskId,
+    linkedTask,
     author: decision.createdBy || "Workspace member",
     date: formatDate(decision.createdAt || decision.updatedAt),
     status: decision.lifecycleStatus || "Accepted",
@@ -67,16 +95,12 @@ function normalizeDecision(decision, discussions = []) {
   };
 }
 
-function getResponseData(response) {
-  return response?.data ?? response;
-}
-
-function DecisionModal({ onClose, onCreate }) {
+function DecisionModal({ onClose, onCreate, tasks }) {
   const [title, setTitle] = useState("");
   const [summary, setSummary] = useState("");
   const [context, setContext] = useState("");
   const [project, setProject] = useState("");
-  const [taskId, setTaskId] = useState("");
+  const [linkedTaskId, setLinkedTaskId] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -97,17 +121,26 @@ function DecisionModal({ onClose, onCreate }) {
     setError("");
 
     try {
+      const selectedTask = tasks.find(
+        (task) => String(task._id || task.id) === linkedTaskId
+      );
+
       await onCreate({
         title: title.trim(),
         summary: summary.trim(),
         context: context.trim(),
         project: project.trim(),
-        taskId: taskId.trim(),
+        linkedTask: linkedTaskId || null,
+        taskId: selectedTask
+          ? String(selectedTask._id || selectedTask.id)
+          : "",
       });
 
       onClose();
     } catch (err) {
-      setError(err.message || "Could not save the decision. Please try again.");
+      setError(
+        err.message || "Could not save the decision. Please try again."
+      );
     } finally {
       setSaving(false);
     }
@@ -236,20 +269,36 @@ function DecisionModal({ onClose, onCreate }) {
 
           <div>
             <label
-              htmlFor="decision-task-id"
+              htmlFor="decision-linked-task"
               className="mb-1.5 block text-sm font-medium text-text"
             >
-              Related task ID
+              Related task
+              <span className="ml-1 font-normal text-muted">(optional)</span>
             </label>
 
-            <input
-              id="decision-task-id"
-              maxLength={100}
-              value={taskId}
-              onChange={(event) => setTaskId(event.target.value)}
-              placeholder="e.g. DS-024"
-              className="w-full rounded-lg border border-line bg-bg px-3 py-2.5 text-sm text-text outline-none placeholder:text-muted focus:border-acc"
-            />
+            <select
+              id="decision-linked-task"
+              value={linkedTaskId}
+              onChange={(event) => setLinkedTaskId(event.target.value)}
+              className="w-full rounded-lg border border-line bg-bg px-3 py-2.5 text-sm text-text outline-none focus:border-acc"
+            >
+              <option value="">No task linked</option>
+
+              {tasks.map((task) => (
+                <option
+                  key={task._id || task.id}
+                  value={String(task._id || task.id)}
+                >
+                  {task.title} · {task.status || "todo"}
+                </option>
+              ))}
+            </select>
+
+            {tasks.length === 0 && (
+              <p className="mt-1.5 text-xs text-muted">
+                No tasks available. You can still record a decision.
+              </p>
+            )}
           </div>
         </div>
 
@@ -289,6 +338,7 @@ function DecisionModal({ onClose, onCreate }) {
 
 export default function Decisions() {
   const [decisions, setDecisions] = useState([]);
+  const [tasks, setTasks] = useState([]);
   const [search, setSearch] = useState("");
   const [projectFilter, setProjectFilter] = useState("All projects");
   const [showModal, setShowModal] = useState(false);
@@ -315,8 +365,26 @@ export default function Decisions() {
         throw new Error("The server returned an unexpected decisions response.");
       }
 
+      // Load tasks separately so a task-loading issue doesn't break the Decision Log.
+      let availableTasks = [];
+
+      try {
+        const taskResponse = await taskAPI.getAll();
+        const taskRecords = getResponseData(taskResponse);
+
+        if (Array.isArray(taskRecords)) {
+          availableTasks = taskRecords;
+        }
+      } catch (taskError) {
+        console.error("Could not load tasks for the Decision Log:", taskError);
+      }
+
+      setTasks(availableTasks);
+
       const savedDecisions = savedRecords
-        .map((decision) => normalizeDecision(decision, discussions))
+        .map((decision) =>
+          normalizeDecision(decision, discussions, availableTasks)
+        )
         .filter((decision) => decision && decision.databaseId);
 
       setDecisions(savedDecisions);
@@ -364,6 +432,8 @@ export default function Decisions() {
         decision.summary,
         decision.context,
         decision.taskId,
+        decision.linkedTask?.title,
+        decision.linkedTask?.status,
         decision.discussionTitle,
         decision.project,
       ]
@@ -386,7 +456,7 @@ export default function Decisions() {
     ) || filteredDecisions[0];
 
   async function createDecision(data) {
-    // Create a source discussion first so the decision keeps its history link.
+    // Create the source discussion first to preserve the decision's history link.
     const discussionResponse = await discussionAPI.create({
       title: `Decision: ${data.title}`,
       project: data.project,
@@ -406,13 +476,14 @@ export default function Decisions() {
       );
     }
 
-    // Save the decision as its own document in the Decision collection.
+    // Save the decision and its actual Task document reference.
     const decisionResponse = await decisionAPI.create({
       title: data.title,
       summary: data.summary,
       context: data.context,
       project: data.project,
       taskId: data.taskId,
+      linkedTask: data.linkedTask || null,
       discussionId,
       createdBy: "Mansi Sinha",
     });
@@ -429,6 +500,14 @@ export default function Decisions() {
       {
         ...savedRecord,
         discussionId,
+        linkedTask:
+          savedRecord.linkedTask ||
+          (data.linkedTask
+            ? tasks.find(
+                (task) =>
+                  String(task._id || task.id) === String(data.linkedTask)
+              ) || null
+            : null),
       },
       [
         {
@@ -436,7 +515,8 @@ export default function Decisions() {
           _id: discussionId,
           title: createdDiscussion.title || `Decision: ${data.title}`,
         },
-      ]
+      ],
+      tasks
     );
 
     setDecisions((current) => [
@@ -473,13 +553,20 @@ export default function Decisions() {
 
       const updatedRecord = getResponseData(response);
 
-      const updatedDecision = normalizeDecision({
-        ...updatedRecord,
-        discussionId:
-          typeof updatedRecord.discussionId === "object"
-            ? updatedRecord.discussionId?._id
-            : updatedRecord.discussionId || selectedDecision.discussionId,
-      });
+      const updatedDecision = normalizeDecision(
+        {
+          ...updatedRecord,
+          linkedTask:
+            updatedRecord.linkedTask || selectedDecision.linkedTask,
+          discussionId:
+            typeof updatedRecord.discussionId === "object"
+              ? updatedRecord.discussionId?._id
+              : updatedRecord.discussionId ||
+                selectedDecision.discussionId,
+        },
+        [],
+        tasks
+      );
 
       setDecisions((current) =>
         current.map((decision) =>
@@ -498,7 +585,8 @@ export default function Decisions() {
       setSavingStatus(false);
     }
   }
-    return (
+
+  return (
     <div className="mx-auto w-full max-w-[1600px] space-y-6 pb-8">
       {/* Header */}
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
@@ -561,7 +649,10 @@ export default function Decisions() {
           <p className="mt-3 font-mono text-2xl text-text">
             {loading
               ? "—"
-              : decisions.filter((decision) => decision.taskId.trim()).length}
+              : decisions.filter(
+                  (decision) =>
+                    decision.linkedTaskId || decision.taskId.trim()
+                ).length}
           </p>
         </div>
       </div>
@@ -577,7 +668,7 @@ export default function Decisions() {
           <input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search decisions, reasoning, or task IDs..."
+            placeholder="Search decisions, reasoning, or tasks..."
             aria-label="Search decisions"
             className="h-10 w-full rounded-lg border border-line bg-surface pl-9 pr-3 text-sm text-text outline-none placeholder:text-muted focus:border-acc"
           />
@@ -658,6 +749,9 @@ export default function Decisions() {
                 const isSelected =
                   selectedDecision?.databaseId === decision.databaseId;
 
+                const taskTitle =
+                  decision.linkedTask?.title || decision.taskId;
+
                 return (
                   <button
                     key={decision.databaseId}
@@ -713,10 +807,10 @@ export default function Decisions() {
                             {decision.date}
                           </span>
 
-                          {decision.taskId && (
-                            <span className="inline-flex items-center gap-1.5">
-                              <Link2 size={13} />
-                              {decision.taskId}
+                          {taskTitle && (
+                            <span className="inline-flex max-w-full items-center gap-1.5">
+                              <Link2 size={13} className="shrink-0" />
+                              <span className="truncate">{taskTitle}</span>
                             </span>
                           )}
                         </div>
@@ -733,6 +827,7 @@ export default function Decisions() {
             </div>
           )}
         </section>
+
         {/* Decision detail panel */}
         {showDecisionDetail && (
           <section className="min-w-0 overflow-hidden rounded-xl border border-line bg-surface">
@@ -798,9 +893,27 @@ export default function Decisions() {
 
                   <div className="rounded-lg border border-line bg-bg p-3">
                     <p className="text-xs text-muted">Related task</p>
+
                     <p className="mt-1 break-words text-sm font-medium text-text">
-                      {selectedDecision.taskId || "No task linked"}
+                      {selectedDecision.linkedTask?.title ||
+                        selectedDecision.taskId ||
+                        "No task linked"}
                     </p>
+
+                    {selectedDecision.linkedTask && (
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <span className="inline-flex items-center gap-1.5 rounded-md border border-line px-2 py-1 text-xs text-muted">
+                          <ClipboardList size={13} />
+                          {selectedDecision.linkedTask.status || "todo"}
+                        </span>
+
+                        {selectedDecision.linkedTask.priority && (
+                          <span className="rounded-md border border-line px-2 py-1 text-xs text-muted">
+                            {selectedDecision.linkedTask.priority} priority
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   <div className="rounded-lg border border-line bg-bg p-3">
@@ -855,10 +968,7 @@ export default function Decisions() {
 
                   {savingStatus && (
                     <p className="mt-2 flex items-center gap-2 text-xs text-muted">
-                      <LoaderCircle
-                        size={14}
-                        className="animate-spin"
-                      />
+                      <LoaderCircle size={14} className="animate-spin" />
                       Updating status...
                     </p>
                   )}
@@ -903,6 +1013,7 @@ export default function Decisions() {
 
       {showModal && (
         <DecisionModal
+          tasks={tasks}
           onClose={() => setShowModal(false)}
           onCreate={createDecision}
         />

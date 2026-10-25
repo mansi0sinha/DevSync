@@ -1,14 +1,18 @@
+
 const express = require("express");
 const mongoose = require("mongoose");
+
 const Decision = require("../models/Decision");
+const Task = require("../models/Task");
 
 const router = express.Router();
 
 // GET /api/decisions
-// Fetch active decisions (exclude Recycle Bin items).
+// Fetch active decisions and populate their linked tasks.
 router.get("/", async (req, res) => {
   try {
     const decisions = await Decision.find({ deletedAt: null })
+      .populate("linkedTask", "title status priority dueDate")
       .sort({ updatedAt: -1 });
 
     res.status(200).json(decisions);
@@ -24,7 +28,9 @@ router.get("/trash", async (req, res) => {
   try {
     const decisions = await Decision.find({
       deletedAt: { $ne: null },
-    }).sort({ deletedAt: -1 });
+    })
+      .populate("linkedTask", "title status priority dueDate")
+      .sort({ deletedAt: -1 });
 
     res.status(200).json(decisions);
   } catch (error) {
@@ -34,7 +40,7 @@ router.get("/trash", async (req, res) => {
 });
 
 // POST /api/decisions
-// Create a standalone decision.
+// Create a standalone decision with an optional linked task.
 router.post("/", async (req, res) => {
   try {
     const {
@@ -43,6 +49,7 @@ router.post("/", async (req, res) => {
       context = "",
       project = "Platform",
       taskId = "",
+      linkedTask = null,
       discussionId = null,
       createdBy = "Unknown",
     } = req.body;
@@ -50,6 +57,22 @@ router.post("/", async (req, res) => {
     if (!title?.trim() || !summary?.trim()) {
       return res.status(400).json({
         message: "Decision title and summary are required.",
+      });
+    }
+
+    if (typeof title !== "string" || typeof summary !== "string") {
+      return res.status(400).json({
+        message: "Title and summary must be text.",
+      });
+    }
+
+    if (
+      typeof context !== "string" ||
+      typeof project !== "string" ||
+      typeof taskId !== "string"
+    ) {
+      return res.status(400).json({
+        message: "Context, project, and task ID must be text.",
       });
     }
 
@@ -62,19 +85,48 @@ router.post("/", async (req, res) => {
       });
     }
 
+    let task = null;
+
+    if (linkedTask) {
+      if (!mongoose.Types.ObjectId.isValid(linkedTask)) {
+        return res.status(400).json({
+          message: "Invalid linked task ID.",
+        });
+      }
+
+      task = await Task.findById(linkedTask);
+
+      if (!task) {
+        return res.status(404).json({
+          message: "The selected task does not exist.",
+        });
+      }
+    }
+
     const decision = await Decision.create({
-      title,
-      summary,
-      context,
-      project,
-      taskId,
-      discussionId,
+      title: title.trim(),
+      summary: summary.trim(),
+      context: context.trim(),
+      project: project.trim() || "Platform",
+      taskId: taskId.trim() || (task ? String(task._id) : ""),
+      linkedTask: task ? task._id : null,
+      discussionId: discussionId || null,
       createdBy,
     });
 
-    res.status(201).json(decision);
+    const populatedDecision = await Decision.findById(decision._id)
+      .populate("linkedTask", "title status priority dueDate");
+
+    res.status(201).json(populatedDecision);
   } catch (error) {
     console.error("Create decision error:", error);
+
+    if (error.name === "ValidationError") {
+      return res.status(400).json({
+        message: error.message,
+      });
+    }
+
     res.status(500).json({ message: "Failed to create decision." });
   }
 });
@@ -102,7 +154,7 @@ router.patch("/:id/status", async (req, res) => {
       { _id: id, deletedAt: null },
       { $set: { lifecycleStatus } },
       { returnDocument: "after", runValidators: true }
-    );
+    ).populate("linkedTask", "title status priority dueDate");
 
     if (!decision) {
       return res.status(404).json({
@@ -118,7 +170,7 @@ router.patch("/:id/status", async (req, res) => {
 });
 
 // PATCH /api/decisions/:id/supersede
-// Mark an older decision as Superseded by a replacement decision.
+// Mark an older decision as superseded by a replacement.
 router.patch("/:id/supersede", async (req, res) => {
   try {
     const { id } = req.params;
@@ -159,7 +211,7 @@ router.patch("/:id/supersede", async (req, res) => {
         },
       },
       { returnDocument: "after", runValidators: true }
-    );
+    ).populate("linkedTask", "title status priority dueDate");
 
     if (!original) {
       return res.status(404).json({
@@ -175,7 +227,7 @@ router.patch("/:id/supersede", async (req, res) => {
 });
 
 // DELETE /api/decisions/:id
-// Soft-delete: move decision to Recycle Bin.
+// Soft-delete: move the decision to the Recycle Bin.
 router.delete("/:id", async (req, res) => {
   try {
     const { id } = req.params;
@@ -193,7 +245,7 @@ router.delete("/:id", async (req, res) => {
         },
       },
       { returnDocument: "after", runValidators: true }
-    );
+    ).populate("linkedTask", "title status priority dueDate");
 
     if (!decision) {
       return res.status(404).json({
@@ -212,7 +264,7 @@ router.delete("/:id", async (req, res) => {
 });
 
 // POST /api/decisions/:id/restore
-// Restore a decision from Recycle Bin.
+// Restore a decision from the Recycle Bin.
 router.post("/:id/restore", async (req, res) => {
   try {
     const { id } = req.params;
@@ -230,7 +282,7 @@ router.post("/:id/restore", async (req, res) => {
         },
       },
       { returnDocument: "after", runValidators: true }
-    );
+    ).populate("linkedTask", "title status priority dueDate");
 
     if (!decision) {
       return res.status(404).json({

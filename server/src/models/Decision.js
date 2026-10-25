@@ -32,10 +32,18 @@ const decisionSchema = new mongoose.Schema(
       maxlength: [100, "Project name cannot exceed 100 characters"],
     },
 
+    // Legacy task ID — preserved for existing decisions.
     taskId: {
       type: String,
       trim: true,
       default: "",
+    },
+
+    // Actual Task document linked to this decision.
+    linkedTask: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Task",
+      default: null,
     },
 
     // Discussion that originally led to this decision.
@@ -78,7 +86,9 @@ const decisionSchema = new mongoose.Schema(
       default: "Unknown",
     },
   },
-  { timestamps: true }
+  {
+    timestamps: true,
+  }
 );
 
 // Helps retrieve active decisions newest first.
