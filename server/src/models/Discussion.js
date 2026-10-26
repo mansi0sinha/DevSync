@@ -126,10 +126,18 @@ const discussionSchema = new mongoose.Schema(
       trim: true,
       default: "Platform",
     },
+    // Legacy task ID field — retained for existing discussions
     taskId: {
       type: String,
       trim: true,
       default: "",
+    },
+
+    // Real reference to a Task document
+    linkedTask: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Task",
+      default: null,
     },
     status: {
       type: String,

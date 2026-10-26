@@ -2,13 +2,24 @@
 const express = require("express");
 const mongoose = require("mongoose");
 const Discussion = require("../models/Discussion");
+const Task = require("../models/Task");
 
 const router = express.Router();
+
+// Populate task details while keeping legacy taskId values intact.
+function populateLinkedTask(query) {
+  return query.populate({
+    path: "linkedTask",
+    select: "title status priority dueDate",
+  });
+}
 
 // GET all discussions
 router.get("/", async (req, res) => {
   try {
-    const discussions = await Discussion.find().sort({ updatedAt: -1 });
+    const discussions = await populateLinkedTask(
+      Discussion.find()
+    ).sort({ updatedAt: -1 });
 
     res.status(200).json({
       success: true,
@@ -28,7 +39,7 @@ router.get("/", async (req, res) => {
 // POST create a discussion with its first message
 router.post("/", async (req, res) => {
   try {
-    const { title, project, taskId, message } = req.body;
+    const { title, project, taskId, linkedTask, message } = req.body;
 
     if (
       typeof title !== "string" ||
@@ -42,14 +53,41 @@ router.post("/", async (req, res) => {
       });
     }
 
+    let taskReference = null;
+
+    // Validate and verify the selected Task document.
+    if (linkedTask) {
+      if (!mongoose.isValidObjectId(linkedTask)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid linked task ID",
+        });
+      }
+
+      const task = await Task.findById(linkedTask).select("_id");
+
+      if (!task) {
+        return res.status(404).json({
+          success: false,
+          message: "The selected task was not found",
+        });
+      }
+
+      taskReference = task._id;
+    }
+
     const discussion = await Discussion.create({
       title: title.trim(),
       project:
         typeof project === "string" && project.trim()
           ? project.trim()
           : "Platform",
+
+      // Keep compatibility with existing discussions.
       taskId:
         typeof taskId === "string" ? taskId.trim() : "",
+
+      linkedTask: taskReference,
       status: "Open",
       messages: [
         {
@@ -61,13 +99,17 @@ router.post("/", async (req, res) => {
       ],
     });
 
+    const populatedDiscussion = await populateLinkedTask(
+      Discussion.findById(discussion._id)
+    );
+
     res.status(201).json({
       success: true,
       message: "Discussion created successfully",
-      data: discussion,
+      data: populatedDiscussion,
     });
   } catch (error) {
-    if (error.name === "ValidationError") {
+    if (error.name === "ValidationError" || error.name === "CastError") {
       return res.status(400).json({
         success: false,
         message: error.message,
@@ -139,13 +181,17 @@ router.post("/:id/messages", async (req, res) => {
 
     await discussion.save();
 
+    const populatedDiscussion = await populateLinkedTask(
+      Discussion.findById(discussion._id)
+    );
+
     res.status(201).json({
       success: true,
       message: "Message added successfully",
-      data: discussion,
+      data: populatedDiscussion,
     });
   } catch (error) {
-    if (error.name === "ValidationError") {
+    if (error.name === "ValidationError" || error.name === "CastError") {
       return res.status(400).json({
         success: false,
         message: error.message,
@@ -232,11 +278,11 @@ router.put("/:id", async (req, res) => {
       });
     }
 
-  const discussion = await Discussion.findByIdAndUpdate(
-  req.params.id,
-  { $set: updates },
-  { returnDocument: "after", runValidators: true }
-);
+    const discussion = await Discussion.findByIdAndUpdate(
+      req.params.id,
+      { $set: updates },
+      { new: true, runValidators: true }
+    );
 
     if (!discussion) {
       return res.status(404).json({
@@ -245,10 +291,14 @@ router.put("/:id", async (req, res) => {
       });
     }
 
+    const populatedDiscussion = await populateLinkedTask(
+      Discussion.findById(discussion._id)
+    );
+
     res.status(200).json({
       success: true,
       message: "Discussion updated successfully",
-      data: discussion,
+      data: populatedDiscussion,
     });
   } catch (error) {
     if (error.name === "ValidationError" || error.name === "CastError") {
