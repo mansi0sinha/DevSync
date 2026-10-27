@@ -1,6 +1,6 @@
+require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
-require("dotenv").config();
 const app = express();
 const PORT = process.env.PORT || 5000;
 const connectDB = require("./config/db");
@@ -10,12 +10,14 @@ const uploadRoutes = require("./routes/uploadRoutes");
 const decisionRoutes = require("./routes/decisionRoutes");
 const path = require("path");
 const workspaceRoutes = require("./routes/workspaceRoutes");
-app.use(cors({ origin: "http://localhost:5173" }));
+const projectRoutes = require("./routes/projectRoutes");
 const authRoutes = require("./routes/authRoutes");
+app.use(cors({ origin: "http://localhost:5173" }));
 app.use(express.json());
 app.use("/api/auth", authRoutes);
 app.use(express.json());
 app.use("/api/workspaces", workspaceRoutes);
+app.use("/api", projectRoutes);
 // Home route
 app.get("/", (req, res) => {
   res.json({

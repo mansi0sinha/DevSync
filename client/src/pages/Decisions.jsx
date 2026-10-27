@@ -886,7 +886,7 @@ export default function Decisions() {
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <div className="rounded-lg border border-line bg-bg p-3">
                     <p className="text-xs text-muted">Project</p>
-                    <p className="mt-1 break-words text-sm font-medium text-text">
+                    <p className="mt-1 wrap-break-word text-sm font-medium text-text">
                       {selectedDecision.project}
                     </p>
                   </div>
@@ -894,7 +894,7 @@ export default function Decisions() {
                   <div className="rounded-lg border border-line bg-bg p-3">
                     <p className="text-xs text-muted">Related task</p>
 
-                    <p className="mt-1 break-words text-sm font-medium text-text">
+                    <p className="mt-1 wrap-break-word text-sm font-medium text-text">
                       {selectedDecision.linkedTask?.title ||
                         selectedDecision.taskId ||
                         "No task linked"}
@@ -925,7 +925,7 @@ export default function Decisions() {
 
                   <div className="rounded-lg border border-line bg-bg p-3">
                     <p className="text-xs text-muted">Recorded by</p>
-                    <p className="mt-1 break-words text-sm font-medium text-text">
+                    <p className="mt-1 wrap-break-word text-sm font-medium text-text">
                       {selectedDecision.author}
                     </p>
                   </div>
@@ -936,7 +936,7 @@ export default function Decisions() {
                     Context and reasoning
                   </h4>
 
-                  <div className="whitespace-pre-wrap break-words rounded-lg border border-line bg-bg p-4 text-sm leading-6 text-muted">
+                  <div className="whitespace-pre-wrap wrap-break-word rounded-lg border border-line bg-bg p-4 text-sm leading-6 text-muted">
                     {selectedDecision.context ||
                       "No additional context was recorded."}
                   </div>
@@ -990,7 +990,7 @@ export default function Decisions() {
                         your team can preserve the context behind the outcome.
                       </p>
 
-                      <p className="mt-2 break-words font-mono text-xs text-muted">
+                      <p className="mt-2 wrap-break-word font-mono text-xs text-muted">
                         {selectedDecision.discussionTitle}
                       </p>
                     </div>
