@@ -18,6 +18,7 @@ import {
 import Button from "../components/ui/Button";
 import {
   discussionAPI,
+  taskAPI,
   uploadAPI,
   getAttachmentURL,
 } from "../services/api";
@@ -69,6 +70,7 @@ function normalizeThread(thread) {
     ...thread,
     id: thread._id || thread.id,
     taskId: thread.taskId || "",
+    linkedTask: thread.linkedTask || null,
     status: thread.status || "Open",
     decision: thread.decision || null,
     messages: (thread.messages || []).map((item, index) => ({
@@ -204,10 +206,10 @@ function MessageAttachments({ attachments = [] }) {
   );
 }
 
-function NewDiscussionModal({ onClose, onCreate }) {
+function NewDiscussionModal({ onClose, onCreate, tasks, tasksError }) {
   const [title, setTitle] = useState("");
   const [project, setProject] = useState("");
-  const [taskId, setTaskId] = useState("");
+  const [linkedTaskId, setLinkedTaskId] = useState("");
   const [message, setMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
@@ -226,7 +228,7 @@ function NewDiscussionModal({ onClose, onCreate }) {
       const created = await onCreate({
         title: title.trim(),
         project: project.trim(),
-        taskId: taskId.trim(),
+        linkedTask: linkedTaskId || null,
         message: message.trim(),
       });
 
@@ -299,14 +301,23 @@ function NewDiscussionModal({ onClose, onCreate }) {
 
           <div>
             <label className="mb-1.5 block text-sm font-medium text-text">
-              Related task ID (optional)
+              Related task (optional)
             </label>
-            <input
-              value={taskId}
-              onChange={(event) => setTaskId(event.target.value)}
-              placeholder="e.g. DS-024"
-              className="w-full rounded-lg border border-line bg-bg px-3 py-2.5 text-sm text-text outline-none placeholder:text-muted focus:border-acc"
-            />
+            <select
+              value={linkedTaskId}
+              onChange={(event) => setLinkedTaskId(event.target.value)}
+              className="w-full rounded-lg border border-line bg-bg px-3 py-2.5 text-sm text-text outline-none focus:border-acc"
+            >
+              <option value="">No linked task</option>
+              {tasks.map((task) => (
+                <option key={task._id || task.id} value={task._id || task.id}>
+                  {task.title} ({task.status || "No status"})
+                </option>
+              ))}
+            </select>
+            {tasksError && (
+              <p className="mt-1 text-xs text-red-500">{tasksError}</p>
+            )}
           </div>
         </div>
 
@@ -450,6 +461,8 @@ function DecisionModal({ thread, onClose, onSave }) {
 
 export default function Discussion() {
   const [threads, setThreads] = useState([]);
+  const [tasks, setTasks] = useState([]);
+  const [tasksError, setTasksError] = useState("");
   const [activeThreadId, setActiveThreadId] = useState(null);
   const [search, setSearch] = useState("");
   const [message, setMessage] = useState("");
@@ -496,7 +509,21 @@ export default function Discussion() {
       }
     }
 
+    async function loadTasks() {
+      try {
+        const result = await taskAPI.getAll();
+        if (cancelled) return;
+        const items = Array.isArray(result) ? result : result?.data;
+        if (!Array.isArray(items)) throw new Error("Unexpected task response");
+        setTasks(items);
+        setTasksError("");
+      } catch (error) {
+        if (!cancelled) setTasksError("Tasks could not be loaded. You can still create a discussion without linking one.");
+      }
+    }
+
     loadDiscussions();
+    loadTasks();
 
     return () => {
       cancelled = true;
@@ -509,7 +536,7 @@ export default function Discussion() {
 
   const filteredThreads = threads.filter((thread) => {
     const matchesSearch =
-      `${thread.title} ${thread.project} ${thread.taskId}`
+      `${thread.title} ${thread.project} ${thread.linkedTask?.title || ""} ${thread.taskId}`
         .toLowerCase()
         .includes(search.toLowerCase());
 
@@ -820,9 +847,9 @@ export default function Discussion() {
                         <span className="rounded-md border border-line bg-surface px-2 py-1 text-[10px] text-muted">
                           {thread.project}
                         </span>
-                        {thread.taskId && (
+                        {(thread.linkedTask?.title || thread.taskId) && (
                           <span className="font-mono text-[10px] text-muted">
-                            {thread.taskId}
+                            {thread.linkedTask?.title || thread.taskId}
                           </span>
                         )}
                       </div>
@@ -860,11 +887,11 @@ export default function Discussion() {
                       {activeThread.project}
                     </span>
 
-                    {activeThread.taskId && (
+                    {(activeThread.linkedTask?.title || activeThread.taskId) && (
                       <>
                         <span className="text-muted">·</span>
                         <span className="font-mono text-xs text-muted">
-                          {activeThread.taskId}
+                          Task: {activeThread.linkedTask?.title || activeThread.taskId}
                         </span>
                       </>
                     )}
@@ -1101,6 +1128,8 @@ export default function Discussion() {
         <NewDiscussionModal
           onClose={() => setShowNewDiscussion(false)}
           onCreate={createDiscussion}
+          tasks={tasks}
+          tasksError={tasksError}
         />
       )}
 
