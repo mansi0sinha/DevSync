@@ -9,12 +9,13 @@ const discussionRoutes = require("./routes/discussionRoutes");
 const uploadRoutes = require("./routes/uploadRoutes");
 const decisionRoutes = require("./routes/decisionRoutes");
 const path = require("path");
+const workspaceRoutes = require("./routes/workspaceRoutes");
 app.use(cors({ origin: "http://localhost:5173" }));
 const authRoutes = require("./routes/authRoutes");
 app.use(express.json());
 app.use("/api/auth", authRoutes);
 app.use(express.json());
-
+app.use("/api/workspaces", workspaceRoutes);
 // Home route
 app.get("/", (req, res) => {
   res.json({
