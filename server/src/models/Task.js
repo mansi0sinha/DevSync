@@ -1,3 +1,4 @@
+
 const mongoose = require("mongoose");
 
 const taskSchema = new mongoose.Schema(
@@ -32,11 +33,35 @@ const taskSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+
+    // Workspace that owns this task
+    workspace: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Workspace",
+      required: true,
+      index: true,
+    },
+
+    // Project this task belongs to
+    project: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Project",
+      required: true,
+      index: true,
+    },
+
+    // User who created the task
+    createdBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+    },
   },
   {
     timestamps: true,
   }
 );
 
+// Reuse the existing model during development
 module.exports =
   mongoose.models.Task || mongoose.model("Task", taskSchema);

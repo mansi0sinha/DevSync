@@ -1,13 +1,13 @@
 
 const mongoose = require("mongoose");
 
-// Attachment schema
 const attachmentSchema = new mongoose.Schema(
   {
     originalName: {
       type: String,
       required: true,
       trim: true,
+      maxlength: 255,
     },
     filename: {
       type: String,
@@ -30,110 +30,102 @@ const attachmentSchema = new mongoose.Schema(
       min: 0,
     },
   },
-  { _id: false }
+  { _id: true }
 );
 
-// Message schema
 const messageSchema = new mongoose.Schema(
   {
     author: {
-      type: String,
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
       required: true,
-      trim: true,
-    },
-    initials: {
-      type: String,
-      default: "",
     },
     text: {
       type: String,
-      default: "",
       trim: true,
-      maxlength: [5000, "Message cannot exceed 5000 characters"],
+      maxlength: 5000,
+      default: "",
     },
     attachments: {
       type: [attachmentSchema],
       default: [],
+      validate: {
+        validator: (attachments) => attachments.length <= 5,
+        message: "A message can have at most 5 attachments.",
+      },
     },
   },
   { timestamps: true }
 );
 
-// Decision schema
 const decisionSchema = new mongoose.Schema(
   {
     title: {
       type: String,
-      required: true,
       trim: true,
-      maxlength: [200, "Decision title cannot exceed 200 characters"],
+      maxlength: 200,
+      default: "",
     },
     summary: {
       type: String,
-      required: true,
       trim: true,
-      maxlength: [5000, "Decision summary cannot exceed 5000 characters"],
+      maxlength: 5000,
+      default: "",
     },
     context: {
       type: String,
       trim: true,
+      maxlength: 5000,
       default: "",
-      maxlength: [5000, "Decision context cannot exceed 5000 characters"],
     },
-
-    // Decision lifecycle
     lifecycleStatus: {
       type: String,
       enum: ["Accepted", "Superseded", "Archived"],
       default: "Accepted",
     },
-
-    // Reference to the decision that replaced this one.
-    // Uses a Discussion document ID because decisions are embedded
-    // inside Discussion documents in our current architecture.
     supersededBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Discussion",
       default: null,
     },
-
-    // Soft-delete / Recycle Bin information
     deletedAt: {
       type: Date,
       default: null,
     },
     deletedBy: {
-      type: String,
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
       default: null,
-      trim: true,
     },
   },
-  { _id: false }
+  { timestamps: true }
 );
 
-// Discussion schema
 const discussionSchema = new mongoose.Schema(
   {
     title: {
       type: String,
-      required: [true, "Discussion title is required"],
+      required: [true, "Discussion title is required."],
       trim: true,
-      maxlength: [200, "Discussion title cannot exceed 200 characters"],
+      maxlength: 200,
+    },
+    workspace: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Workspace",
+      required: true,
+      index: true,
     },
     project: {
-      type: String,
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Project",
       required: true,
-      trim: true,
-      default: "Platform",
+      index: true,
     },
-    // Legacy task ID field — retained for existing discussions
-    taskId: {
-      type: String,
-      trim: true,
-      default: "",
+    createdBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
     },
-
-    // Real reference to a Task document
     linkedTask: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Task",
@@ -156,7 +148,6 @@ const discussionSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// Export model
-module.exports =
-  mongoose.models.Discussion ||
-  mongoose.model("Discussion", discussionSchema);
+discussionSchema.index({ workspace: 1, project: 1, createdAt: -1 });
+
+module.exports = mongoose.model("Discussion", discussionSchema);

@@ -1,4 +1,6 @@
 
+import { useEffect, useMemo, useState } from "react";
+
 import {
   ArrowUpRight,
   CheckCircle2,
@@ -8,88 +10,13 @@ import {
   MessageSquare,
   Plus,
   ArrowRight,
+  AlertCircle,
+  LoaderCircle,
+  ListTodo,
 } from "lucide-react";
 
 import Button from "../components/ui/Button";
-
-const stats = [
-  {
-    label: "Open tasks",
-    value: "12",
-    detail: "Across all projects",
-    icon: CircleDashed,
-  },
-  {
-    label: "In progress",
-    value: "4",
-    detail: "Currently being worked on",
-    icon: Clock3,
-  },
-  {
-    label: "Completed",
-    value: "18",
-    detail: "Tasks finished",
-    icon: CheckCircle2,
-  },
-  {
-    label: "Decisions logged",
-    value: "6",
-    detail: "Team decisions recorded",
-    icon: GitMerge,
-  },
-];
-
-const activity = [
-  {
-    type: "task",
-    title: "Set up authentication flow",
-    detail: "Moved to In Progress",
-    project: "Platform",
-    time: "12 min ago",
-  },
-  {
-    type: "decision",
-    title: "Use JWT for session handling",
-    detail: "A decision was recorded",
-    project: "Platform",
-    time: "38 min ago",
-  },
-  {
-    type: "discussion",
-    title: "API response structure",
-    detail: "New discussion message",
-    project: "API Service",
-    time: "1 hr ago",
-  },
-  {
-    type: "task",
-    title: "Create dashboard wireframe",
-    detail: "Task marked as completed",
-    project: "Web App",
-    time: "3 hrs ago",
-  },
-];
-
-const tasks = [
-  {
-    id: "DS-024",
-    title: "Implement user authentication",
-    project: "Platform",
-    status: "In progress",
-  },
-  {
-    id: "DS-025",
-    title: "Design database schema",
-    project: "API Service",
-    status: "To do",
-  },
-  {
-    id: "DS-026",
-    title: "Review API error handling",
-    project: "Platform",
-    status: "In review",
-  },
-];
+import { taskAPI } from "../services/api";
 
 function SectionHeading({ title, action, onAction }) {
   return (
@@ -111,31 +38,172 @@ function SectionHeading({ title, action, onAction }) {
 }
 
 function StatusChip({ status }) {
+  const normalizedStatus = String(status || "To do")
+    .toLowerCase()
+    .trim();
+
   const styles = {
-    "In progress": "border border-acc/30 bg-accSoft text-acc",
-    "In review": "border border-line bg-hover text-muted",
-    "To do": "border border-line bg-surface text-muted",
+    "in progress": "border border-acc/30 bg-accSoft text-acc",
+    "in-progress": "border border-acc/30 bg-accSoft text-acc",
+    "in review": "border border-line bg-hover text-muted",
+    review: "border border-line bg-hover text-muted",
+    completed: "border border-line bg-hover text-muted",
+    done: "border border-line bg-hover text-muted",
+    todo: "border border-line bg-surface text-muted",
+    "to do": "border border-line bg-surface text-muted",
+    open: "border border-line bg-surface text-muted",
   };
 
   return (
     <span
       className={`inline-flex whitespace-nowrap rounded-md px-2 py-1 text-xs font-medium ${
-        styles[status] || styles["To do"]
+        styles[normalizedStatus] || styles["to do"]
       }`}
     >
-      {status}
+      {status || "To do"}
     </span>
   );
 }
 
-export default function Dashboard({ onNavigate }) {
+function EmptyState({ icon: Icon, title, description }) {
+  return (
+    <div className="flex flex-col items-center justify-center px-4 py-10 text-center">
+      <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-xl border border-line bg-hover text-muted">
+        <Icon size={20} strokeWidth={1.8} />
+      </div>
+      <p className="text-sm font-medium text-text">{title}</p>
+      <p className="mt-1 max-w-sm text-sm leading-5 text-muted">
+        {description}
+      </p>
+    </div>
+  );
+}
+
+function getTaskStatus(task) {
+  return String(task?.status || "To do").toLowerCase().trim();
+}
+
+function isCompleted(task) {
+  return ["completed", "complete", "done"].includes(
+    getTaskStatus(task)
+  );
+}
+
+function isInProgress(task) {
+  return ["in progress", "in-progress", "in_progress"].includes(
+    getTaskStatus(task)
+  );
+}
+
+export default function Dashboard({
+  onNavigate,
+  workspaceId,
+  projectId,
+}) {
+  const [tasks, setTasks] = useState([]);
+  const [loadingTasks, setLoadingTasks] = useState(false);
+  const [taskError, setTaskError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!workspaceId || !projectId) {
+      setTasks([]);
+      setTaskError("");
+      setLoadingTasks(false);
+      return undefined;
+    }
+
+    async function fetchTasks() {
+      setLoadingTasks(true);
+      setTaskError("");
+
+      try {
+        const result = await taskAPI.getAll(workspaceId, projectId);
+
+        // The API wrapper may return the response body directly.
+        const fetchedTasks = Array.isArray(result)
+          ? result
+          : Array.isArray(result?.data)
+            ? result.data
+            : Array.isArray(result?.tasks)
+              ? result.tasks
+              : [];
+
+        if (!cancelled) {
+          setTasks(fetchedTasks);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setTasks([]);
+          setTaskError(error?.message || "Failed to load tasks.");
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingTasks(false);
+        }
+      }
+    }
+
+    fetchTasks();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId, projectId]);
+
+  const stats = useMemo(() => {
+    const completed = tasks.filter(isCompleted).length;
+    const inProgress = tasks.filter(isInProgress).length;
+    const open = tasks.length - completed;
+
+    return [
+      {
+        label: "Open tasks",
+        value: open,
+        detail: "Not yet completed",
+        icon: CircleDashed,
+      },
+      {
+        label: "In progress",
+        value: inProgress,
+        detail: "Currently being worked on",
+        icon: Clock3,
+      },
+      {
+        label: "Completed",
+        value: completed,
+        detail: "Tasks finished",
+        icon: CheckCircle2,
+      },
+      {
+        label: "Decisions logged",
+        value: "—",
+        detail: "Decision data not connected",
+        icon: GitMerge,
+      },
+    ];
+  }, [tasks]);
+
+  const recentTasks = useMemo(() => {
+    return [...tasks]
+      .sort((a, b) => {
+        const dateA = new Date(a?.createdAt || 0).getTime();
+        const dateB = new Date(b?.createdAt || 0).getTime();
+        return dateB - dateA;
+      })
+      .slice(0, 5);
+  }, [tasks]);
+
+  const hasProject = Boolean(workspaceId && projectId);
+
   return (
     <div className="mx-auto w-full max-w-7xl space-y-8 pb-8">
       {/* Page heading */}
       <section className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
         <div>
           <p className="mb-2 text-sm text-muted">
-            Friday, your workspace at a glance
+            Your workspace at a glance
           </p>
 
           <h1 className="text-2xl font-semibold tracking-tight text-text sm:text-3xl">
@@ -154,147 +222,200 @@ export default function Dashboard({ onNavigate }) {
         </Button>
       </section>
 
-      {/* Stats */}
-      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {stats.map((stat) => {
-          const Icon = stat.icon;
+      {/* No selected project */}
+      {!hasProject && (
+        <section className="rounded-xl border border-line bg-surface">
+          <EmptyState
+            icon={ListTodo}
+            title="Select a project to get started"
+            description="Choose a workspace and project from the header to see its actual tasks and statistics here."
+          />
+        </section>
+      )}
 
-          return (
-            <div
-              key={stat.label}
-              className="rounded-xl border border-line bg-surface p-5"
-            >
-              <div className="flex items-center justify-between gap-3">
-                <p className="text-sm font-medium text-muted">
-                  {stat.label}
+      {/* Task loading error */}
+      {hasProject && taskError && (
+        <section className="rounded-xl border border-line bg-surface p-5">
+          <div className="flex items-start gap-3">
+            <AlertCircle
+              size={20}
+              className="mt-0.5 shrink-0 text-amb"
+            />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium text-text">
+                Couldn't load project tasks
+              </p>
+              <p className="mt-1 text-sm text-muted">{taskError}</p>
+              <button
+                type="button"
+                onClick={() => {
+                  setTaskError("");
+                  setLoadingTasks(true);
+                  taskAPI
+                    .getAll(workspaceId, projectId)
+                    .then((result) => {
+                      const data = Array.isArray(result)
+                        ? result
+                        : Array.isArray(result?.data)
+                          ? result.data
+                          : Array.isArray(result?.tasks)
+                            ? result.tasks
+                            : [];
+
+                      setTasks(data);
+                    })
+                    .catch((error) => {
+                      setTaskError(
+                        error?.message || "Failed to load tasks."
+                      );
+                    })
+                    .finally(() => setLoadingTasks(false));
+                }}
+                className="mt-3 text-sm font-medium text-acc hover:underline"
+              >
+                Try again
+              </button>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* Real task statistics */}
+      {hasProject && !taskError && (
+        <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          {stats.map((stat) => {
+            const Icon = stat.icon;
+
+            return (
+              <div
+                key={stat.label}
+                className="rounded-xl border border-line bg-surface p-5"
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-sm font-medium text-muted">
+                    {stat.label}
+                  </p>
+
+                  <Icon
+                    size={18}
+                    strokeWidth={1.8}
+                    className="text-muted"
+                  />
+                </div>
+
+                <p className="mt-5 font-mono text-3xl font-medium tracking-tight text-text">
+                  {loadingTasks ? (
+                    <LoaderCircle
+                      size={25}
+                      className="animate-spin text-muted"
+                    />
+                  ) : (
+                    stat.value
+                  )}
                 </p>
 
-                <Icon
-                  size={18}
-                  strokeWidth={1.8}
-                  className="text-muted"
-                />
+                <p className="mt-2 text-xs text-muted">{stat.detail}</p>
               </div>
-
-              <p className="mt-5 font-mono text-3xl font-medium tracking-tight text-text">
-                {stat.value}
-              </p>
-
-              <p className="mt-2 text-xs text-muted">{stat.detail}</p>
-            </div>
-          );
-        })}
-      </section>
+            );
+          })}
+        </section>
+      )}
 
       {/* Main content */}
-      <section className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,1.5fr)_minmax(300px,1fr)]">
-        {/* Recent tasks */}
-        <div className="min-w-0 rounded-xl border border-line bg-surface p-5">
-          <SectionHeading
-            title="Recent tasks"
-            action="Open board"
-            onAction={() => onNavigate?.("board")}
-          />
+      {hasProject && (
+        <section className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,1.5fr)_minmax(300px,1fr)]">
+          {/* Recent tasks */}
+          <div className="min-w-0 rounded-xl border border-line bg-surface p-5">
+            <SectionHeading
+              title="Recent tasks"
+              action="Open board"
+              onAction={() => onNavigate?.("board")}
+            />
 
-          <div className="divide-y divide-line">
-            {tasks.map((task) => (
-              <div
-                key={task.id}
-                className="flex flex-col gap-3 py-4 first:pt-1 last:pb-1 sm:flex-row sm:items-center"
-              >
-                <div className="flex min-w-0 flex-1 items-start gap-3">
-                  <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border border-line">
-                    <span className="h-1.5 w-1.5 rounded-full bg-faint" />
-                  </div>
-
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-text">
-                      {task.title}
-                    </p>
-
-                    <div className="mt-1.5 flex flex-wrap items-center gap-2">
-                      <span className="font-mono text-[11px] text-muted">
-                        {task.id}
-                      </span>
-                      <span className="text-muted">·</span>
-                      <span className="text-xs text-muted">
-                        {task.project}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="sm:pl-2">
-                  <StatusChip status={task.status} />
-                </div>
+            {loadingTasks ? (
+              <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted">
+                <LoaderCircle size={17} className="animate-spin" />
+                Loading project tasks...
               </div>
-            ))}
-          </div>
+            ) : taskError ? (
+              <EmptyState
+                icon={AlertCircle}
+                title="Tasks unavailable"
+                description="Check your connection and try loading the project again."
+              />
+            ) : recentTasks.length === 0 ? (
+              <EmptyState
+                icon={ListTodo}
+                title="No tasks yet"
+                description="Tasks created for this project will appear here."
+              />
+            ) : (
+              <div className="divide-y divide-line">
+                {recentTasks.map((task, index) => {
+                  const taskId = task?._id || task?.id || `task-${index}`;
 
-          <button
-            type="button"
-            onClick={() => onNavigate?.("board")}
-            className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-faint px-4 py-3 text-sm font-medium text-muted transition-colors hover:border-line hover:bg-hover hover:text-text"
-          >
-            <Plus size={16} />
-            Explore all tasks
-          </button>
-        </div>
+                  return (
+                    <div
+                      key={taskId}
+                      className="flex flex-col gap-3 py-4 first:pt-1 last:pb-1 sm:flex-row sm:items-center"
+                    >
+                      <div className="flex min-w-0 flex-1 items-start gap-3">
+                        <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border border-line">
+                          <span className="h-1.5 w-1.5 rounded-full bg-faint" />
+                        </div>
 
-        {/* Activity feed */}
-        <div className="min-w-0 rounded-xl border border-line bg-surface p-5">
-          <SectionHeading
-            title="Recent activity"
-            action="Discussion"
-            onAction={() => onNavigate?.("discussion")}
-          />
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-text">
+                            {task?.title || "Untitled task"}
+                          </p>
 
-          <div className="space-y-5">
-            {activity.map((item, index) => {
-              const Icon =
-                item.type === "decision"
-                  ? GitMerge
-                  : item.type === "discussion"
-                    ? MessageSquare
-                    : item.type === "task"
-                      ? CheckCircle2
-                      : ArrowUpRight;
+                          <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                            <span className="font-mono text-[11px] text-muted">
+                              {String(taskId).slice(-8)}
+                            </span>
+                            <span className="text-muted">·</span>
+                            <span className="text-xs text-muted">
+                              {task?.priority || "Normal priority"}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
 
-              const isDecision = item.type === "decision";
-
-              return (
-                <div key={`${item.title}-${index}`} className="flex gap-3">
-                  <div
-                    className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border ${
-                      isDecision
-                        ? "border-amb/30 bg-ambSoft text-amb"
-                        : "border-line bg-hover text-muted"
-                    }`}
-                  >
-                    <Icon size={17} strokeWidth={1.8} />
-                  </div>
-
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium leading-5 text-text">
-                      {item.title}
-                    </p>
-
-                    <p className="mt-1 text-xs leading-5 text-muted">
-                      {item.detail}
-                    </p>
-
-                    <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted">
-                      <span>{item.project}</span>
-                      <span>·</span>
-                      <span>{item.time}</span>
+                      <div className="sm:pl-2">
+                        <StatusChip status={task?.status} />
+                      </div>
                     </div>
-                  </div>
-                </div>
-              );
-            })}
+                  );
+                })}
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={() => onNavigate?.("board")}
+              className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-faint px-4 py-3 text-sm font-medium text-muted transition-colors hover:border-line hover:bg-hover hover:text-text"
+            >
+              <Plus size={16} />
+              Explore all tasks
+            </button>
           </div>
-        </div>
-      </section>
+
+          {/* Activity feed */}
+          <div className="min-w-0 rounded-xl border border-line bg-surface p-5">
+            <SectionHeading
+              title="Recent activity"
+              action="Discussion"
+              onAction={() => onNavigate?.("discussion")}
+            />
+
+            <EmptyState
+              icon={MessageSquare}
+              title="Activity feed isn't connected yet"
+              description="Once real activity events are recorded, recent task, discussion, and decision changes will appear here."
+            />
+          </div>
+        </section>
+      )}
 
       {/* Quick navigation */}
       <section>
