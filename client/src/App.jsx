@@ -63,6 +63,12 @@ function App() {
   const [loadingProjects, setLoadingProjects] = useState(false);
   const [workspaceError, setWorkspaceError] = useState("");
   const [projectError, setProjectError] = useState("");
+  const [workspaceFormOpen, setWorkspaceFormOpen] = useState(false);
+  const [projectFormOpen, setProjectFormOpen] = useState(false);
+  const [workspaceName, setWorkspaceName] = useState("");
+  const [projectName, setProjectName] = useState("");
+  const [savingWorkspace, setSavingWorkspace] = useState(false);
+  const [savingProject, setSavingProject] = useState(false);
 
   const navigate = useCallback((page, options = {}) => {
     if (!validPages.includes(page)) return;
@@ -261,76 +267,92 @@ function App() {
     setUser(loggedInUser || getSavedUser());
   }
 
-  async function handleCreateWorkspace() {
-    const name = window.prompt("Enter a name for your new workspace:");
-    if (!name?.trim()) return;
+  async function handleCreateWorkspace(event) {
+    event?.preventDefault();
+    const name = workspaceName.trim();
+    if (name.length < 2) {
+      setWorkspaceError("Workspace name must be at least 2 characters.");
+      return;
+    }
 
+    setSavingWorkspace(true);
     setWorkspaceError("");
 
     try {
-      const result = await workspaceAPI.create({ name: name.trim() });
+      const result = await workspaceAPI.create({ name });
       const created = result.workspace || result.data?.workspace || result;
+      let newWorkspace = created;
 
       if (!getItemId(created)) {
         const refreshed = await workspaceAPI.getAll();
         const list = getList(refreshed, "workspaces");
         setWorkspaces(list);
-
-        const matching = list.find(
-          (item) => item.name === name.trim()
-        );
-
-        if (matching) setWorkspaceId(getItemId(matching));
-        return;
+        newWorkspace = list.find((item) => item.name === name);
+      } else {
+        setWorkspaces((current) => [
+          ...current.filter((item) => getItemId(item) !== getItemId(created)),
+          created,
+        ]);
       }
 
-      setWorkspaces((current) => [
-        ...current.filter((item) => getItemId(item) !== getItemId(created)),
-        created,
-      ]);
-      setWorkspaceId(getItemId(created));
+      if (newWorkspace && getItemId(newWorkspace)) {
+        setWorkspaceId(getItemId(newWorkspace));
+        setWorkspaceFormOpen(false);
+        setWorkspaceName("");
+      } else {
+        throw new Error("Workspace was created, but could not be loaded. Refresh and try again.");
+      }
     } catch (error) {
       setWorkspaceError(error.message || "Could not create workspace.");
+    } finally {
+      setSavingWorkspace(false);
     }
   }
 
-  async function handleCreateProject() {
+  async function handleCreateProject(event) {
+    event?.preventDefault();
     if (!workspaceId) {
-      setProjectError("Create or select a workspace first.");
+      setProjectError("Select a workspace first.");
       return;
     }
 
-    const name = window.prompt("Enter a name for your new project:");
-    if (!name?.trim()) return;
+    const name = projectName.trim();
+    if (name.length < 2) {
+      setProjectError("Project name must be at least 2 characters.");
+      return;
+    }
 
+    setSavingProject(true);
     setProjectError("");
 
     try {
-      const result = await projectAPI.create(workspaceId, {
-        name: name.trim(),
-      });
+      const result = await projectAPI.create(workspaceId, { name });
       const created = result.project || result.data?.project || result;
+      let newProject = created;
 
       if (!getItemId(created)) {
         const refreshed = await projectAPI.getAll(workspaceId);
         const list = getList(refreshed, "projects");
         setProjects(list);
-
-        const matching = list.find(
-          (item) => item.name === name.trim()
-        );
-
-        if (matching) setProjectId(getItemId(matching));
-        return;
+        newProject = list.find((item) => item.name === name);
+      } else {
+        setProjects((current) => [
+          ...current.filter((item) => getItemId(item) !== getItemId(created)),
+          created,
+        ]);
       }
 
-      setProjects((current) => [
-        ...current.filter((item) => getItemId(item) !== getItemId(created)),
-        created,
-      ]);
-      setProjectId(getItemId(created));
+      if (newProject && getItemId(newProject)) {
+        setProjectId(getItemId(newProject));
+        setProjectFormOpen(false);
+        setProjectName("");
+      } else {
+        throw new Error("Project was created, but could not be loaded. Refresh and try again.");
+      }
     } catch (error) {
       setProjectError(error.message || "Could not create project.");
+    } finally {
+      setSavingProject(false);
     }
   }
 
@@ -449,7 +471,7 @@ function App() {
 
               <button
                 type="button"
-                onClick={handleCreateWorkspace}
+                onClick={() => { setWorkspaceError(""); setWorkspaceFormOpen(true); }}
                 className="rounded-lg border border-line bg-surface px-3 py-2 text-sm font-medium text-text hover:bg-hover"
               >
                 + Workspace
@@ -482,7 +504,7 @@ function App() {
 
               <button
                 type="button"
-                onClick={handleCreateProject}
+                onClick={() => { setProjectError(""); setProjectFormOpen(true); }}
                 disabled={!workspaceId}
                 className="rounded-lg bg-teal-700 px-3 py-2 text-sm font-semibold text-white hover:bg-teal-800 disabled:cursor-not-allowed disabled:opacity-50"
               >
@@ -503,6 +525,87 @@ function App() {
               </button>
             </div>
           </div>
+
+          {(workspaceFormOpen || projectFormOpen) && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+              <div className="w-full max-w-md rounded-xl border border-line bg-surface p-6">
+                <div className="mb-5 flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-teal-700">
+                      {workspaceFormOpen ? "Workspace setup" : "Project setup"}
+                    </p>
+                    <h2 className="mt-1 text-xl font-semibold text-text">
+                      {workspaceFormOpen ? "Create a workspace" : "Create a project"}
+                    </h2>
+                    <p className="mt-2 text-sm leading-5 text-muted">
+                      {workspaceFormOpen
+                        ? "Bring your team, projects, and decisions together in one place."
+                        : "Projects keep tasks and discussions organized inside the selected workspace."}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setWorkspaceFormOpen(false);
+                      setProjectFormOpen(false);
+                    }}
+                    className="rounded-md px-2 py-1 text-muted hover:bg-hover hover:text-text"
+                    aria-label="Close form"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                <form onSubmit={workspaceFormOpen ? handleCreateWorkspace : handleCreateProject}>
+                  <label htmlFor="workspace-project-name" className="mb-1.5 block text-sm font-medium text-text">
+                    {workspaceFormOpen ? "Workspace name" : "Project name"}
+                  </label>
+                  <input
+                    id="workspace-project-name"
+                    autoFocus
+                    required
+                    minLength={2}
+                    maxLength={workspaceFormOpen ? 80 : 100}
+                    value={workspaceFormOpen ? workspaceName : projectName}
+                    onChange={(event) => {
+                      if (workspaceFormOpen) setWorkspaceName(event.target.value);
+                      else setProjectName(event.target.value);
+                    }}
+                    placeholder={workspaceFormOpen ? "e.g. Engineering Team" : "e.g. DevSync"}
+                    className="w-full rounded-lg border border-line bg-bg px-3 py-2.5 text-sm text-text outline-none placeholder:text-muted focus:border-teal-600"
+                  />
+
+                  {!workspaceFormOpen && !projectFormOpen && (workspaceError || projectError) && (
+                    <p role="alert" className="mt-2 text-sm text-red-500">
+                      {workspaceFormOpen ? workspaceError : projectError}
+                    </p>
+                  )}
+
+                  <div className="mt-5 flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setWorkspaceFormOpen(false);
+                        setProjectFormOpen(false);
+                      }}
+                      className="rounded-lg border border-line px-3 py-2 text-sm font-medium text-text hover:bg-hover"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={workspaceFormOpen ? savingWorkspace : savingProject}
+                      className="rounded-lg bg-teal-700 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-800 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {(workspaceFormOpen ? savingWorkspace : savingProject)
+                        ? "Creating..."
+                        : workspaceFormOpen ? "Create workspace" : "Create project"}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
 
           {(workspaceError || projectError) && (
             <div
