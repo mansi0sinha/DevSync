@@ -1,38 +1,11 @@
-
-import { useEffect, useState } from "react";
 import { Sun, Moon } from "lucide-react";
+import { useTheme } from "./ThemeContext";
 
-export default function ThemeToggle() {
-  const [isDark, setIsDark] = useState(() => {
-    try {
-      return localStorage.getItem("devsync-theme") === "dark";
-    } catch {
-      return document.documentElement.classList.contains("dark");
-    }
-  });
-
-  useEffect(() => {
-    const root = document.documentElement;
-
-    root.classList.toggle("dark", isDark);
-
-    try {
-      localStorage.setItem("devsync-theme", isDark ? "dark" : "light");
-    } catch (error) {
-      console.error("Could not save DevSync theme:", error);
-    }
-  }, [isDark]);
+export default function ThemeToggle({ className = "" }) {
+  const { isDark, setTheme } = useTheme();
 
   function toggleTheme() {
-    const root = document.documentElement;
-    root.classList.add("theme-switching");
-    setIsDark((previous) => !previous);
-
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        root.classList.remove("theme-switching");
-      });
-    });
+    setTheme(isDark ? "light" : "dark");
   }
 
   return (
@@ -41,13 +14,9 @@ export default function ThemeToggle() {
       onClick={toggleTheme}
       aria-label={`Switch to ${isDark ? "light" : "dark"} mode`}
       title={`Switch to ${isDark ? "light" : "dark"} mode`}
-      className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-line bg-surface text-muted hover:bg-hover hover:text-text"
+      className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-line bg-surface text-muted hover:bg-hover hover:text-text focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc ${className}`}
     >
-      {isDark ? (
-        <Sun size={18} strokeWidth={1.8} />
-      ) : (
-        <Moon size={18} strokeWidth={1.8} />
-      )}
+      {isDark ? <Sun size={18} strokeWidth={1.8} /> : <Moon size={18} strokeWidth={1.8} />}
     </button>
   );
 }

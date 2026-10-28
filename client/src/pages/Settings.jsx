@@ -1,5 +1,5 @@
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   UserRound,
   Building2,
@@ -14,6 +14,7 @@ import {
   RotateCcw,
 } from "lucide-react";
 import Button from "../components/ui/Button";
+import { useTheme } from "../components/ui/ThemeContext";
 
 const DEFAULT_PROFILE = {
   name: "Your Name",
@@ -53,34 +54,11 @@ function readStored(key, fallback) {
   }
 }
 
-function readTheme() {
-  try {
-    return localStorage.getItem("devsync-theme") || DEFAULT_THEME;
-  } catch {
-    return DEFAULT_THEME;
-  }
-}
-
-function applyTheme(theme) {
-  const isDark =
-    theme === "dark" ||
-    (theme === "system" &&
-      window.matchMedia("(prefers-color-scheme: dark)").matches);
-
-  document.documentElement.classList.toggle("dark", isDark);
-
-  try {
-    localStorage.setItem("devsync-theme", theme);
-  } catch {
-    // The theme still works if browser storage is unavailable.
-  }
-}
-
 function Settings() {
   const [activeSection, setActiveSection] = useState("profile");
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState("");
-  const [theme, setTheme] = useState(readTheme);
+  const { theme, setTheme } = useTheme();
 
   const [profile, setProfile] = useState(() =>
     readStored("devsync-profile", DEFAULT_PROFILE)
@@ -93,22 +71,6 @@ function Settings() {
   const [notifications, setNotifications] = useState(() =>
     readStored("devsync-notifications", DEFAULT_NOTIFICATIONS)
   );
-
-  useEffect(() => {
-    applyTheme(theme);
-  }, [theme]);
-
-  useEffect(() => {
-    if (theme !== "system") return;
-
-    const media = window.matchMedia("(prefers-color-scheme: dark)");
-    const update = () => {
-      document.documentElement.classList.toggle("dark", media.matches);
-    };
-
-    media.addEventListener("change", update);
-    return () => media.removeEventListener("change", update);
-  }, [theme]);
 
   function markChanged() {
     setSaved(false);
@@ -139,7 +101,6 @@ function Settings() {
 
   function changeTheme(nextTheme) {
     setTheme(nextTheme);
-    applyTheme(nextTheme);
     setSaved(false);
     setSaveError("");
   }

@@ -3,6 +3,11 @@ const mongoose = require("mongoose");
 
 const attachmentSchema = new mongoose.Schema(
   {
+    uploadId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Upload",
+      default: null,
+    },
     originalName: {
       type: String,
       required: true,

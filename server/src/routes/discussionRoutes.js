@@ -6,7 +6,11 @@ const Discussion = require("../models/Discussion");
 const Workspace = require("../models/Workspace");
 const Project = require("../models/Project");
 const Task = require("../models/Task");
+const Upload = require("../models/Upload");
 const authMiddleware = require("../middleware/authMiddleware");
+const { emitProjectEvent } = require("../realtime");
+const { recordProjectEvent } = require("../services/projectEvents");
+const { clearCrossScopeTask } = require("../utils/scopedTaskReference");
 
 const router = express.Router();
 
@@ -46,13 +50,17 @@ const getWorkspaceMembership = (workspaceId, userId) =>
     "members.user": userId,
   });
 
-const populateDiscussion = (query) =>
-  query
+const populateDiscussion = async (query) => {
+  const result = await query
     .populate("workspace", "name")
     .populate("project", "name workspace")
     .populate("createdBy", "name email avatar")
     .populate("messages.author", "name email avatar")
     .populate("linkedTask", "title status priority dueDate project workspace");
+  const discussions = Array.isArray(result) ? result : [result];
+  discussions.filter(Boolean).forEach((discussion) => clearCrossScopeTask(discussion));
+  return result;
+};
 
 // Resolve and verify the requested project and workspace.
 async function resolveProjectAccess(workspaceId, projectId, userId) {
@@ -186,9 +194,7 @@ router.get("/", async (req, res) => {
       filter.project = project._id;
     }
 
-    const discussions = await populateDiscussion(
-      Discussion.find(filter)
-    ).sort({ updatedAt: -1 });
+    const discussions = await populateDiscussion(Discussion.find(filter).sort({ updatedAt: -1 }));
 
     return res.status(200).json({
       success: true,
@@ -286,6 +292,16 @@ router.post("/", async (req, res) => {
       Discussion.findById(discussion._id)
     );
 
+    await emitProjectEvent(req.app.get("io"), {
+      workspaceId: access.workspace._id,
+      projectId: access.project._id,
+    }, "discussion:created", { discussion: result });
+    await recordProjectEvent({
+      io: req.app.get("io"), actorId: req.user._id, workspaceId: access.workspace._id,
+      projectId: access.project._id, action: "discussion.created", summary: `Started discussion: ${discussion.title}`,
+      entityType: "discussion", entityId: discussion._id, eventKey: `discussion.created:${discussion._id}`,
+    });
+
     return res.status(201).json({
       success: true,
       message: "Discussion created successfully.",
@@ -317,6 +333,10 @@ router.post("/:id/messages", async (req, res) => {
       });
     }
 
+    if (!req.body || typeof req.body !== "object" || Array.isArray(req.body)) {
+      return res.status(400).json({ success: false, message: "A valid message body is required." });
+    }
+
     const { text = "", attachments = [] } = req.body;
 
     if (typeof text !== "string" || text.length > 5000) {
@@ -333,6 +353,36 @@ router.post("/:id/messages", async (req, res) => {
       });
     }
 
+    const uploadIds = [];
+    for (const attachment of attachments) {
+      if (
+        !attachment || typeof attachment !== "object" || Array.isArray(attachment) ||
+        Object.keys(attachment).length !== 1 ||
+        !Object.prototype.hasOwnProperty.call(attachment, "uploadId") ||
+        !mongoose.isObjectIdOrHexString(attachment.uploadId)
+      ) {
+        return res.status(400).json({ success: false, message: "Each attachment must reference a valid upload ID." });
+      }
+      uploadIds.push(String(attachment.uploadId));
+    }
+
+    if (new Set(uploadIds).size !== uploadIds.length) {
+      return res.status(400).json({ success: false, message: "Duplicate attachments are not allowed." });
+    }
+
+    const uploads = uploadIds.length
+      ? await Upload.find({
+          _id: { $in: uploadIds },
+          workspace: access.discussion.workspace,
+          project: access.discussion.project,
+          uploadedBy: req.user._id,
+        })
+      : [];
+
+    if (uploads.length !== uploadIds.length) {
+      return res.status(400).json({ success: false, message: "An attachment is unknown or does not belong to this user, workspace, and project." });
+    }
+
     if (!text.trim() && attachments.length === 0) {
       return res.status(400).json({
         success: false,
@@ -343,7 +393,14 @@ router.post("/:id/messages", async (req, res) => {
     access.discussion.messages.push({
       author: req.user._id,
       text: text.trim(),
-      attachments,
+      attachments: uploads.map((asset) => ({
+        uploadId: asset._id,
+        originalName: asset.originalName,
+        filename: asset.filename,
+        url: `/api/uploads/file/${asset._id}`,
+        mimetype: asset.mimetype,
+        size: asset.size,
+      })),
     });
 
     await access.discussion.save();
@@ -351,6 +408,30 @@ router.post("/:id/messages", async (req, res) => {
     const result = await populateDiscussion(
       Discussion.findById(access.discussion._id)
     );
+
+    const savedMessage = result.messages[result.messages.length - 1];
+    await emitProjectEvent(req.app.get("io"), {
+      workspaceId: access.workspace._id,
+      projectId: access.discussion.project,
+    }, "discussion:message", {
+      discussionId: String(access.discussion._id),
+      message: savedMessage,
+    });
+    const messageRecipients = [access.discussion.createdBy];
+    if (access.discussion.linkedTask) {
+      const linkedTask = await Task.findOne({ _id: access.discussion.linkedTask, workspace: access.workspace._id, project: access.discussion.project }).select("assignee");
+      if (linkedTask?.assignee) messageRecipients.push(linkedTask.assignee);
+    }
+    await recordProjectEvent({
+      io: req.app.get("io"), actorId: req.user._id, workspaceId: access.workspace._id,
+      projectId: access.discussion.project, action: "discussion.message_added",
+      summary: `Added a message to: ${access.discussion.title}`,
+      entityType: "discussion", entityId: access.discussion._id, eventKey: `discussion.message:${savedMessage._id}`,
+      notifications: [...new Set(messageRecipients.map(String))].map((recipient) => ({
+        recipient, type: "discussion.message", title: "New discussion message", message: access.discussion.title,
+        eventKey: String(savedMessage._id),
+      })),
+    });
 
     return res.status(201).json({
       success: true,
@@ -468,6 +549,19 @@ router.put("/:id", async (req, res) => {
     const result = await populateDiscussion(
       Discussion.findById(updated._id)
     );
+
+    await emitProjectEvent(req.app.get("io"), {
+      workspaceId: access.workspace._id,
+      projectId: access.discussion.project,
+    }, "discussion:updated", { discussion: result });
+    if (updates.status || updates.decision) {
+      await recordProjectEvent({
+        io: req.app.get("io"), actorId: req.user._id, workspaceId: access.workspace._id,
+        projectId: access.discussion.project, action: updates.decision ? "discussion.decision_recorded" : "discussion.updated",
+        summary: updates.decision ? `Recorded a decision from: ${access.discussion.title}` : `Updated discussion: ${access.discussion.title}`,
+        entityType: "discussion", entityId: access.discussion._id, eventKey: `discussion.updated:${updated.updatedAt?.getTime() || Date.now()}`,
+      });
+    }
 
     return res.status(200).json({
       success: true,

@@ -3,6 +3,7 @@ import { useState } from "react";
 import { ArrowRight, Eye, EyeOff, LockKeyhole, Mail, UserRound } from "lucide-react";
 import { authAPI, saveSession } from "../services/api";
 import Button from "../components/ui/Button";
+import ThemeToggle from "../components/ui/ThemeToggle";
 
 export default function Register({ onNavigate, onLogin }) {
   const [form, setForm] = useState({
@@ -56,13 +57,19 @@ export default function Register({ onNavigate, onLogin }) {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-bg px-5 py-10 text-text">
+    <main className="relative flex min-h-screen items-center justify-center bg-bg px-5 py-10 text-text">
+      <ThemeToggle className="absolute right-4 top-4" />
       <div className="w-full max-w-md">
         <div className="mb-8 flex items-center justify-center gap-3">
           <img
             src="/devsync-mark-light.svg"
             alt="DevSync"
-            className="h-11 w-11 object-contain"
+            className="h-11 w-11 object-contain dark:hidden"
+          />
+          <img
+            src="/devsync-mark-dark.svg"
+            alt="DevSync"
+            className="hidden h-11 w-11 object-contain dark:block"
           />
           <span className="text-2xl font-extrabold tracking-tight">DevSync</span>
         </div>

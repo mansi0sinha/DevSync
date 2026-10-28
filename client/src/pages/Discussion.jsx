@@ -18,10 +18,13 @@ import {
 import Button from "../components/ui/Button";
 import {
   discussionAPI,
+  decisionAPI,
   taskAPI,
   uploadAPI,
   getAttachmentURL,
+  getToken,
 } from "../services/api";
+import { subscribeRealtime } from "../services/realtime";
 
 const MAX_FILES = 5;
 const MAX_FILE_SIZE = 5 * 1024 * 1024;
@@ -66,28 +69,40 @@ function formatMessageTime(dateValue) {
 }
 
 function normalizeThread(thread) {
+  const project = typeof thread.project === "string"
+    ? thread.project
+    : thread.project?.name || "Project";
+
   return {
     ...thread,
     id: thread._id || thread.id,
+    project,
     taskId: thread.taskId || "",
     linkedTask: thread.linkedTask || null,
     status: thread.status || "Open",
     decision: thread.decision || null,
-    messages: (thread.messages || []).map((item, index) => ({
-      ...item,
-      id: item._id || item.id || `${thread._id || thread.id}-message-${index}`,
-      text: item.text || "",
-      attachments: item.attachments || [],
-      initials:
-        item.initials ||
-        (item.author || "U")
-          .split(" ")
-          .map((part) => part[0])
-          .join("")
-          .slice(0, 2)
-          .toUpperCase(),
-      time: item.time || formatMessageTime(item.createdAt),
-    })),
+    messages: (thread.messages || []).map((item, index) => {
+      const author = typeof item.author === "string"
+        ? item.author
+        : item.author?.name || item.author?.email || "Workspace member";
+
+      return {
+        ...item,
+        id: item._id || item.id || `${thread._id || thread.id}-message-${index}`,
+        author,
+        text: item.text || "",
+        attachments: item.attachments || [],
+        initials:
+          item.initials ||
+          author
+            .split(" ")
+            .map((part) => part[0])
+            .join("")
+            .slice(0, 2)
+            .toUpperCase(),
+        time: item.time || formatMessageTime(item.createdAt),
+      };
+    }),
   };
 }
 
@@ -155,60 +170,94 @@ function FilePreview({ file, onRemove, disabled }) {
   );
 }
 
-function MessageAttachments({ attachments = [] }) {
-  if (!attachments.length) return null;
+function AttachmentLink({ attachment }) {
+  const [fileURL, setFileURL] = useState("");
+  const [error, setError] = useState("");
+  const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    let objectURL;
+    const trustedURL = getAttachmentURL(attachment.url, attachment.uploadId);
+
+    Promise.resolve()
+      .then(() => {
+        if (!trustedURL) throw new Error("UNTRUSTED_ATTACHMENT_URL");
+        return fetch(trustedURL, {
+          headers: { Authorization: `Bearer ${getToken() || ""}` },
+          signal: controller.signal,
+        });
+      })
+      .then((response) => {
+        if (!response.ok) throw new Error("Attachment unavailable");
+        return response.blob();
+      })
+      .then((blob) => {
+        objectURL = URL.createObjectURL(blob);
+        setFileURL(objectURL);
+        setError("");
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) {
+          setError(trustedURL
+            ? "Couldn't load this attachment."
+            : "This attachment link is unverified. Ask the sender to upload it again.");
+        }
+      });
+
+    return () => {
+      controller.abort();
+      if (objectURL) URL.revokeObjectURL(objectURL);
+    };
+  }, [attachment.uploadId, attachment.url, attempt]);
+
+  const isImage = attachment.mimetype?.startsWith("image/");
 
   return (
-    <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
-      {attachments.map((attachment, index) => {
-        const url = getAttachmentURL(attachment.url);
-        const isImage = attachment.mimetype?.startsWith("image/");
-
-        return (
-          <a
-            key={`${attachment.filename || attachment.originalName}-${index}`}
-            href={url}
-            target="_blank"
-            rel="noreferrer"
-            className="group flex min-w-0 items-center gap-3 rounded-lg border border-line bg-bg p-3 transition-colors hover:border-acc/50 hover:bg-hover"
-            title={`Open ${attachment.originalName}`}
-          >
-            {isImage ? (
-              <img
-                src={url}
-                alt={attachment.originalName || "Attached image"}
-                loading="lazy"
-                className="h-12 w-12 shrink-0 rounded-md border border-line object-cover"
-              />
-            ) : (
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-md border border-line bg-surface text-muted">
-                <FileText size={20} />
-              </div>
-            )}
-
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-xs font-medium text-text">
-                {attachment.originalName || "Attachment"}
-              </p>
-              <p className="mt-1 text-[11px] text-muted">
-                {formatFileSize(attachment.size)}
-              </p>
-            </div>
-
-            <Download
-              size={15}
-              className="shrink-0 text-muted group-hover:text-acc"
-            />
-          </a>
-        );
-      })}
+    <div className="min-w-0 rounded-lg border border-line bg-bg p-3">
+      <div className="flex items-center gap-3">
+        {isImage && fileURL ? (
+          <img src={fileURL} alt={attachment.originalName || "Attached image"} loading="lazy" className="h-12 w-12 shrink-0 rounded-md border border-line object-cover" />
+        ) : (
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-md border border-line bg-surface text-muted">
+            <FileText size={20} />
+          </div>
+        )}
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-xs font-medium text-text">{attachment.originalName || "Attachment"}</p>
+          {fileURL ? (
+            <a href={fileURL} target="_blank" rel="noreferrer" className="mt-1 inline-flex items-center gap-1 text-[11px] text-muted hover:text-text">
+              {formatFileSize(attachment.size)} <Download size={12} /> Open or download
+            </a>
+          ) : error ? (
+            <p role="alert" className="mt-1 text-[11px] text-red-600">{error}</p>
+          ) : (
+            <p className="mt-1 text-[11px] text-muted">Loading attachment...</p>
+          )}
+        </div>
+      </div>
+      {error && getAttachmentURL(attachment.url, attachment.uploadId) && (
+        <button type="button" onClick={() => setAttempt((value) => value + 1)} className="mt-2 text-xs font-medium text-acc hover:underline">
+          Retry
+        </button>
+      )}
     </div>
   );
 }
 
-function NewDiscussionModal({ onClose, onCreate, tasks, tasksError }) {
+function MessageAttachments({ attachments = [] }) {
+  if (!attachments.length) return null;
+  return (
+    <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+      {attachments.map((attachment, index) => (
+        <AttachmentLink key={`${attachment.uploadId || attachment.url || attachment.filename || attachment.originalName}-${index}`} attachment={attachment} />
+      ))}
+    </div>
+  );
+}
+
+function NewDiscussionModal({ onClose, onCreate, tasks, tasksError, projectName }) {
   const [title, setTitle] = useState("");
-  const [project, setProject] = useState("");
   const [linkedTaskId, setLinkedTaskId] = useState("");
   const [message, setMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -217,7 +266,7 @@ function NewDiscussionModal({ onClose, onCreate, tasks, tasksError }) {
   async function handleSubmit(event) {
     event.preventDefault();
 
-    if (!title.trim() || !project.trim() || !message.trim() || submitting) {
+    if (!title.trim() || !message.trim() || submitting) {
       return;
     }
 
@@ -227,7 +276,6 @@ function NewDiscussionModal({ onClose, onCreate, tasks, tasksError }) {
 
       const created = await onCreate({
         title: title.trim(),
-        project: project.trim(),
         linkedTask: linkedTaskId || null,
         message: message.trim(),
       });
@@ -285,18 +333,9 @@ function NewDiscussionModal({ onClose, onCreate, tasks, tasksError }) {
         />
 
         <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div>
-            <label className="mb-1.5 block text-sm font-medium text-text">
-              Project
-            </label>
-            <input
-              required
-              maxLength={100}
-              value={project}
-              onChange={(event) => setProject(event.target.value)}
-              placeholder="e.g. DevSync"
-              className="w-full rounded-lg border border-line bg-bg px-3 py-2.5 text-sm text-text outline-none placeholder:text-muted focus:border-acc"
-            />
+          <div className="rounded-lg border border-line bg-bg p-3">
+            <p className="mb-1.5 text-sm font-medium text-text">Project</p>
+            <p className="text-sm text-muted">{projectName || "Selected project"}</p>
           </div>
 
           <div>
@@ -459,7 +498,72 @@ function DecisionModal({ thread, onClose, onSave }) {
   );
 }
 
-export default function Discussion() {
+function MessageDecisionModal({ thread, message, tasks, onClose, onSave }) {
+  const author = message.author || "Workspace member";
+  const [title, setTitle] = useState(`Decision from ${thread.title}`.slice(0, 200));
+  const [summary, setSummary] = useState(message.text || "");
+  const [context, setContext] = useState(`Source message by ${author}:\n${message.text || ""}`.slice(0, 5000));
+  const [linkedTaskId, setLinkedTaskId] = useState(String(thread.linkedTask?._id || thread.linkedTask?.id || ""));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  async function submit(event) {
+    event.preventDefault();
+    if (saving || !title.trim() || !summary.trim() || !context.trim()) return;
+    setSaving(true);
+    setError("");
+    try {
+      await onSave({
+        title: title.trim(),
+        summary: summary.trim(),
+        context: context.trim(),
+        linkedTask: linkedTaskId || null,
+        discussionId: thread.id,
+        discussionMessageId: message.id,
+      });
+      onClose();
+    } catch (failure) {
+      setError(failure.message || "Could not save this decision.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !saving) onClose(); }}>
+      <form role="dialog" aria-modal="true" aria-labelledby="message-decision-title" onSubmit={submit} className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-xl border border-line bg-surface p-6 shadow-xl">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h2 id="message-decision-title" className="text-lg font-semibold text-text">Record as decision</h2>
+            <p className="mt-1 text-sm text-muted">From {author} in “{thread.title}”</p>
+          </div>
+          <button type="button" aria-label="Close dialog" disabled={saving} onClick={onClose} className="rounded-md p-2 text-muted hover:bg-hover"><X size={18} /></button>
+        </div>
+        <blockquote className="mt-4 max-h-28 overflow-y-auto whitespace-pre-wrap wrap-break-word rounded-lg border border-line bg-bg p-3 text-sm text-muted">{message.text || "This message contains an attachment and no text."}</blockquote>
+        <label className="mt-4 block text-sm font-medium text-text">Decision title</label>
+        <input required maxLength={200} value={title} onChange={(event) => setTitle(event.target.value)} className="mt-1.5 w-full rounded-lg border border-line bg-bg px-3 py-2.5 text-sm text-text outline-none focus:border-acc" />
+        <label className="mt-4 block text-sm font-medium text-text">Outcome and details</label>
+        <textarea required maxLength={5000} rows={3} value={summary} onChange={(event) => setSummary(event.target.value)} placeholder="What was decided?" className="mt-1.5 w-full resize-y rounded-lg border border-line bg-bg px-3 py-2.5 text-sm text-text outline-none focus:border-acc" />
+        <label className="mt-4 block text-sm font-medium text-text">Rationale</label>
+        <textarea required maxLength={5000} rows={3} value={context} onChange={(event) => setContext(event.target.value)} placeholder="Why was this approach chosen?" className="mt-1.5 w-full resize-y rounded-lg border border-line bg-bg px-3 py-2.5 text-sm text-text outline-none focus:border-acc" />
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <div className="rounded-lg border border-line bg-bg p-3"><p className="text-sm font-medium text-text">Source author</p><p className="mt-1 text-sm text-muted">{author} (recorded as decision creator: you)</p></div>
+          <label className="text-sm font-medium text-text">Related task (optional)
+            <select value={linkedTaskId} onChange={(event) => setLinkedTaskId(event.target.value)} className="mt-1.5 h-11 w-full rounded-lg border border-line bg-bg px-3 font-normal text-text">
+              <option value="">No task linked</option>
+              {tasks.map((task) => <option key={task._id || task.id} value={String(task._id || task.id)}>{task.title}</option>)}
+            </select>
+          </label>
+        </div>
+        <p className="mt-3 text-xs text-muted">Participant fields are not supported by the current Decision model. The source author and decision creator are preserved.</p>
+        {error && <p role="alert" className="mt-4 rounded-lg border border-red-500/30 p-3 text-sm text-red-500">{error}</p>}
+        <div className="mt-5 flex justify-end gap-2"><Button type="button" variant="secondary" disabled={saving} onClick={onClose}>Cancel</Button><Button type="submit" disabled={saving || !title.trim() || !summary.trim() || !context.trim()}><GitMerge size={15} />{saving ? "Saving..." : "Save decision"}</Button></div>
+      </form>
+    </div>
+  );
+}
+
+export default function Discussion({ workspaceId, projectId, workspace, project, onOpenDecision }) {
   const [threads, setThreads] = useState([]);
   const [tasks, setTasks] = useState([]);
   const [tasksError, setTasksError] = useState("");
@@ -473,8 +577,19 @@ export default function Discussion() {
   const [loading, setLoading] = useState(true);
   const [pageError, setPageError] = useState("");
   const [sendingMessage, setSendingMessage] = useState(false);
+  const [focusedMessageId, setFocusedMessageId] = useState("");
+  const [recordedDecisions, setRecordedDecisions] = useState({});
+  const [recordingMessage, setRecordingMessage] = useState(null);
+  const [pageNotice, setPageNotice] = useState("");
+  const [lastRecordedDecisionId, setLastRecordedDecisionId] = useState("");
+  const [discussionLoadAttempt, setDiscussionLoadAttempt] = useState(0);
+  const threadsRef = useRef(threads);
 
   const fileInputRef = useRef(null);
+
+  useEffect(() => {
+    threadsRef.current = threads;
+  }, [threads]);
 
   useEffect(() => {
     let cancelled = false;
@@ -484,13 +599,29 @@ export default function Discussion() {
         setLoading(true);
         setPageError("");
 
-        const result = await discussionAPI.getAll();
+        if (!workspaceId || !projectId) {
+          setThreads([]);
+          setActiveThreadId(null);
+          return;
+        }
+        const result = await discussionAPI.getAll(workspaceId, projectId);
         if (cancelled) return;
 
         const loadedThreads = (result.data || []).map(normalizeThread);
         setThreads(loadedThreads);
 
+        const requestedThreadId = sessionStorage.getItem("devsync_discussion_focus");
+        const requestedMessageId = sessionStorage.getItem("devsync_message_focus");
+        const requestedThread = loadedThreads.find((thread) => thread.id === requestedThreadId);
+        if (requestedThread) {
+          setActiveThreadId(requestedThread.id);
+          setFocusedMessageId(requestedThread.messages.some((message) => message.id === requestedMessageId) ? requestedMessageId : "");
+        }
+        sessionStorage.removeItem("devsync_discussion_focus");
+        sessionStorage.removeItem("devsync_message_focus");
+
         setActiveThreadId((currentId) => {
+          if (requestedThread) return requestedThread.id;
           if (
             currentId &&
             loadedThreads.some((thread) => thread.id === currentId)
@@ -511,13 +642,17 @@ export default function Discussion() {
 
     async function loadTasks() {
       try {
-        const result = await taskAPI.getAll();
+        if (!workspaceId || !projectId) {
+          setTasks([]);
+          return;
+        }
+        const result = await taskAPI.getAll(workspaceId, projectId);
         if (cancelled) return;
         const items = Array.isArray(result) ? result : result?.data;
         if (!Array.isArray(items)) throw new Error("Unexpected task response");
         setTasks(items);
         setTasksError("");
-      } catch (error) {
+      } catch {
         if (!cancelled) setTasksError("Tasks could not be loaded. You can still create a discussion without linking one.");
       }
     }
@@ -528,11 +663,81 @@ export default function Discussion() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [workspaceId, projectId, discussionLoadAttempt]);
+
+  useEffect(() => {
+    const matchesScope = (event) => String(event?.workspaceId) === String(workspaceId) && String(event?.projectId) === String(projectId);
+    const unsubscribers = [
+      subscribeRealtime("discussion:created", (event) => {
+        if (!matchesScope(event) || !event.discussion) return;
+        const incoming = normalizeThread(event.discussion);
+        if (!incoming.id) return;
+        setThreads((current) => current.some((item) => item.id === incoming.id) ? current : [incoming, ...current]);
+      }),
+      subscribeRealtime("discussion:message", (event) => {
+        if (!matchesScope(event) || !event.discussionId || !event.message) return;
+        const threadId = String(event.discussionId);
+        if (!threadsRef.current.some((item) => item.id === threadId)) {
+          setDiscussionLoadAttempt((attempt) => attempt + 1);
+          return;
+        }
+        setThreads((current) => current.map((thread) => {
+          if (thread.id !== threadId || thread.messages.some((item) => item.id === String(event.message._id || event.message.id))) return thread;
+          return normalizeThread({ ...thread, messages: [...thread.messages, event.message] });
+        }));
+      }),
+      subscribeRealtime("discussion:updated", (event) => {
+        if (!matchesScope(event) || !event.discussion) return;
+        const incoming = normalizeThread(event.discussion);
+        setThreads((current) => current.map((thread) => thread.id === incoming.id ? incoming : thread));
+      }),
+      subscribeRealtime("realtime:resync", (event) => {
+        if (matchesScope(event)) setDiscussionLoadAttempt((attempt) => attempt + 1);
+      }),
+    ];
+    return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
+  }, [workspaceId, projectId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!workspaceId || !projectId) {
+      return () => { cancelled = true; };
+    }
+    decisionAPI.getAll(workspaceId, projectId).then((result) => {
+      if (cancelled) return;
+      const records = Array.isArray(result) ? result : result?.data || [];
+      const linked = {};
+      const includeRecords = (items, deleted = false) => items.forEach((decision) => {
+        const discussionId = String(decision.discussionId?._id || decision.discussionId || "");
+        const messageId = String(decision.discussionMessageId || "");
+        if (discussionId && messageId) linked[`${discussionId}:${messageId}`] = { id: String(decision._id || decision.id), deleted };
+      });
+      includeRecords(records);
+      decisionAPI.getTrash(workspaceId, projectId).then((trashResult) => {
+        if (cancelled) return;
+        const trashed = Array.isArray(trashResult) ? trashResult : trashResult?.data || [];
+        includeRecords(trashed, true);
+        setRecordedDecisions(linked);
+      }).catch(() => {
+        if (!cancelled) setRecordedDecisions(linked);
+      });
+    }).catch(() => {
+      if (!cancelled) setRecordedDecisions({});
+    });
+    return () => { cancelled = true; };
+  }, [workspaceId, projectId]);
 
   const activeThread = threads.find(
     (thread) => thread.id === activeThreadId
   );
+
+  useEffect(() => {
+    if (!activeThread || !focusedMessageId) return;
+    const messageElement = Array.from(document.querySelectorAll("[data-message-id]")).find(
+      (element) => element.dataset.messageId === focusedMessageId
+    );
+    if (messageElement) messageElement.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [activeThread, focusedMessageId]);
 
   const filteredThreads = threads.filter((thread) => {
     const matchesSearch =
@@ -549,7 +754,7 @@ export default function Discussion() {
   });
 
   async function createDiscussion(data) {
-    const result = await discussionAPI.create(data);
+    const result = await discussionAPI.create({ ...data, workspaceId, projectId });
     const createdThread = normalizeThread(result.data);
 
     setThreads((current) => [
@@ -637,14 +842,12 @@ export default function Discussion() {
       let attachments = [];
 
       if (selectedFiles.length > 0) {
-        const uploadResult = await uploadAPI.uploadFiles(selectedFiles);
-        attachments = uploadResult.data || [];
+        const uploadResult = await uploadAPI.uploadFiles(selectedFiles, workspaceId, projectId);
+        attachments = (uploadResult.data || []).map(({ uploadId }) => ({ uploadId }));
       }
 
       const result = await discussionAPI.addMessage(activeThread.id, {
         text,
-        author: "Mansi Sinha",
-        initials: "MS",
         attachments,
       });
 
@@ -683,6 +886,17 @@ export default function Discussion() {
       setPageError(error.message || "Failed to save decision.");
       throw error;
     }
+  }
+
+  async function recordMessageAsDecision(data) {
+    const result = await decisionAPI.create({ ...data, workspaceId, projectId });
+    const savedDecision = result?.data || result;
+    const decisionId = String(savedDecision?._id || savedDecision?.id || "");
+    if (!decisionId) throw new Error("The server did not return the saved decision.");
+    const key = `${data.discussionId}:${data.discussionMessageId}`;
+    setRecordedDecisions((current) => ({ ...current, [key]: decisionId }));
+    setLastRecordedDecisionId(decisionId);
+    setPageNotice("Decision saved to this project's Decision Log.");
   }
 
   async function toggleThreadStatus(threadId) {
@@ -730,7 +944,7 @@ export default function Discussion() {
   }
 
   return (
-    <div className="mx-auto flex h-full min-h-150 w-full max-w-none flex-col gap-5 pb-2">
+    <div className="mx-auto flex min-h-[calc(100dvh-10rem)] w-full max-w-none flex-col gap-5 pb-2">
       {pageError && (
         <div
           role="alert"
@@ -747,10 +961,16 @@ export default function Discussion() {
           </button>
         </div>
       )}
+      {pageNotice && (
+        <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-acc/30 bg-accSoft px-4 py-3 text-sm text-acc">
+          <span>{pageNotice}</span>
+          <div className="flex items-center gap-3"><button type="button" className="font-medium underline" onClick={() => onOpenDecision?.(lastRecordedDecisionId)}>Open Decision Log entry</button><button type="button" aria-label="Dismiss notice" onClick={() => setPageNotice("")}><X size={15} /></button></div>
+        </div>
+      )}
 
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
         <div>
-          <p className="mb-2 text-sm text-muted">Workspace / Engineering</p>
+          <p className="mb-2 text-sm text-muted">{workspace?.name || "Workspace"} / {project?.name || "Project"}</p>
           <h1 className="text-2xl font-semibold tracking-tight text-text sm:text-3xl">
             Discussion
           </h1>
@@ -765,8 +985,8 @@ export default function Discussion() {
         </Button>
       </div>
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden rounded-xl border border-line bg-surface lg:grid-cols-[280px_minmax(0,1fr)]">
-        <aside className="flex min-h-0 flex-col border-b border-line bg-side lg:border-b-0 lg:border-r">
+      <div className="grid min-h-[680px] flex-1 grid-cols-1 grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-xl border border-line bg-surface lg:min-h-[560px] lg:grid-cols-[280px_minmax(0,1fr)] lg:grid-rows-1">
+        <aside className="flex max-h-64 min-h-0 flex-col border-b border-line bg-side lg:max-h-none lg:border-b-0 lg:border-r">
           <div className="border-b border-line p-4">
             <div className="relative">
               <Search
@@ -873,7 +1093,7 @@ export default function Discussion() {
           </div>
         </aside>
 
-        <section className="flex min-h-125 min-w-0 flex-col">
+        <section className="flex min-h-[460px] min-w-0 flex-col lg:min-h-0">
           {activeThread ? (
             <>
               <div className="flex flex-col justify-between gap-3 border-b border-line p-4 sm:flex-row sm:items-start sm:p-5">
@@ -909,17 +1129,6 @@ export default function Discussion() {
                 </div>
 
                 <div className="flex shrink-0 items-center gap-2">
-                  {activeThread.status === "Open" && (
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      onClick={() => setShowDecisionModal(true)}
-                    >
-                      <GitMerge size={14} />
-                      Record decision
-                    </Button>
-                  )}
-
                   <button
                     type="button"
                     onClick={() => toggleThreadStatus(activeThread.id)}
@@ -955,7 +1164,8 @@ export default function Discussion() {
                   {activeThread.messages.map((item) => (
                     <div
                       key={item.id}
-                      className="mb-6 flex items-start gap-3"
+                      data-message-id={item.id}
+                      className={`mb-6 flex items-start gap-3 rounded-lg ${focusedMessageId === item.id ? "ring-2 ring-acc/50 ring-offset-4 ring-offset-surface" : ""}`}
                     >
                       <Avatar initials={item.initials} />
 
@@ -976,6 +1186,20 @@ export default function Discussion() {
                         )}
 
                         <MessageAttachments attachments={item.attachments} />
+                        {item.text.trim() && /^[a-f\d]{24}$/i.test(item.id) && (
+                          <button
+                            type="button"
+                          onClick={() => recordedDecisions[`${activeThread.id}:${item.id}`]
+                              ? onOpenDecision?.(recordedDecisions[`${activeThread.id}:${item.id}`].id)
+                              : setRecordingMessage(item)}
+                            className="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-amb hover:underline"
+                          >
+                            <GitMerge size={13} />
+                            {recordedDecisions[`${activeThread.id}:${item.id}`]
+                              ? recordedDecisions[`${activeThread.id}:${item.id}`].deleted ? "View in Recycle Bin" : "Open recorded decision"
+                              : "Record as decision"}
+                          </button>
+                        )}
                       </div>
 
                       <button
@@ -1022,7 +1246,7 @@ export default function Discussion() {
 
               <form
                 onSubmit={sendMessage}
-                className="border-t border-line bg-surface p-4 sm:p-5"
+                className="shrink-0 border-t border-line bg-surface p-3 sm:p-5"
               >
                 {activeThread.status === "Resolved" && (
                   <div className="mb-3 flex items-center gap-2 rounded-lg border border-line bg-bg px-3 py-2 text-xs text-muted">
@@ -1065,7 +1289,7 @@ export default function Discussion() {
                     </div>
                   )}
 
-                  <div className="mt-2 flex items-center justify-between border-t border-line pt-3">
+                  <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-line pt-3">
                     <div className="flex items-center gap-2">
                       <input
                         ref={fileInputRef}
@@ -1087,7 +1311,7 @@ export default function Discussion() {
                         <Paperclip size={17} />
                       </button>
 
-                      <span className="text-[11px] text-muted">
+                      <span className="text-[10px] text-muted sm:text-[11px]">
                         {selectedFiles.length}/{MAX_FILES} files · 5 MB max each
                       </span>
                     </div>
@@ -1095,6 +1319,7 @@ export default function Discussion() {
                     <Button
                       type="submit"
                       size="sm"
+                      className="shrink-0"
                       disabled={
                         (!message.trim() && selectedFiles.length === 0) ||
                         sendingMessage
@@ -1130,6 +1355,7 @@ export default function Discussion() {
           onCreate={createDiscussion}
           tasks={tasks}
           tasksError={tasksError}
+          projectName={project?.name}
         />
       )}
 
@@ -1139,6 +1365,16 @@ export default function Discussion() {
           thread={activeThread}
           onClose={() => setShowDecisionModal(false)}
           onSave={saveDecision}
+        />
+      )}
+      {recordingMessage && activeThread && (
+        <MessageDecisionModal
+          key={`${activeThread.id}:${recordingMessage.id}`}
+          thread={activeThread}
+          message={recordingMessage}
+          tasks={tasks}
+          onClose={() => setRecordingMessage(null)}
+          onSave={recordMessageAsDecision}
         />
       )}
     </div>

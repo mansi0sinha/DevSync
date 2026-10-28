@@ -5,6 +5,7 @@
 
 /* Light theme */
 :root {
+  color-scheme: light;
   --bg: #F6F6F3;
   --side: #F0F1ED;
   --col: #EEEEEA;
@@ -27,6 +28,7 @@
 
 /* Dark theme */
 .dark {
+  color-scheme: dark;
   --bg: #101211;
   --side: #141716;
   --col: #151817;

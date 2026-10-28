@@ -32,6 +32,20 @@ const decisionSchema = new mongoose.Schema(
       maxlength: [100, "Project name cannot exceed 100 characters"],
     },
 
+    workspace: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Workspace",
+      required: true,
+      index: true,
+    },
+
+    projectRef: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Project",
+      required: true,
+      index: true,
+    },
+
     // Legacy task ID — preserved for existing decisions.
     taskId: {
       type: String,
@@ -50,6 +64,11 @@ const decisionSchema = new mongoose.Schema(
     discussionId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Discussion",
+      default: null,
+    },
+
+    discussionMessageId: {
+      type: mongoose.Schema.Types.ObjectId,
       default: null,
     },
 
@@ -85,6 +104,8 @@ const decisionSchema = new mongoose.Schema(
       trim: true,
       default: "Unknown",
     },
+    aiSuggestionId: { type: mongoose.Schema.Types.ObjectId, ref: "AISuggestion", default: null },
+    aiSuggestionItemKey: { type: String, default: null, maxlength: 40 },
   },
   {
     timestamps: true,
@@ -92,7 +113,18 @@ const decisionSchema = new mongoose.Schema(
 );
 
 // Helps retrieve active decisions newest first.
-decisionSchema.index({ deletedAt: 1, updatedAt: -1 });
+decisionSchema.index({ workspace: 1, projectRef: 1, deletedAt: 1, updatedAt: -1 });
+decisionSchema.index(
+  { workspace: 1, projectRef: 1, discussionMessageId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { discussionMessageId: { $type: "objectId" } },
+  }
+);
+decisionSchema.index({ aiSuggestionId: 1, aiSuggestionItemKey: 1 }, {
+  unique: true,
+  partialFilterExpression: { aiSuggestionId: { $type: "objectId" } },
+});
 
 // Export model
 module.exports =

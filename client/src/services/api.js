@@ -1,5 +1,10 @@
-const API_BASE_URL = "http://localhost:5000/api";
-const API_ORIGIN = API_BASE_URL.replace(/\/api$/, "");
+import { resolveApiConfig } from "./apiConfig.js";
+
+const { apiBaseUrl: API_BASE_URL, apiOrigin: API_ORIGIN } = resolveApiConfig({
+  configuredUrl: import.meta.env.VITE_API_BASE_URL,
+  isProduction: import.meta.env.PROD,
+});
+export { API_ORIGIN };
 const TOKEN_KEY = "devsync_token";
 const USER_KEY = "devsync_user";
 
@@ -98,6 +103,18 @@ export const workspaceAPI = {
       body: JSON.stringify(workspace),
     }),
 
+  createInvitation: (workspaceId, email) =>
+    request(`/workspaces/${workspaceId}/invitations`, {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    }),
+
+  acceptInvitation: (token) =>
+    request("/workspaces/invitations/accept", {
+      method: "POST",
+      body: JSON.stringify({ token }),
+    }),
+
   addMember: (workspaceId, email) =>
     request(`/workspaces/${workspaceId}/members`, {
       method: "POST",
@@ -126,9 +143,6 @@ export const projectAPI = {
 // Existing task API
 
 export const taskAPI = {
-  // Fetch tasks from the selected workspace or project.
-  // Without filters, the backend returns tasks from workspaces
-  // the authenticated user belongs to.
   getAll: (workspaceId, projectId) => {
     const params = new URLSearchParams();
 
@@ -140,21 +154,44 @@ export const taskAPI = {
     return request(`/tasks${query ? `?${query}` : ""}`);
   },
 
-  // The task object must include workspaceId and projectId.
   create: (task) =>
     request("/tasks", {
       method: "POST",
       body: JSON.stringify(task),
     }),
 
-  update: (id, task) =>
-    request(`/tasks/${id}`, {
+  update: (id, task, workspaceId, projectId) =>
+    request(`/tasks/${id}?${new URLSearchParams({ workspaceId, projectId })}`, {
       method: "PUT",
       body: JSON.stringify(task),
     }),
 
-  delete: (id) =>
-    request(`/tasks/${id}`, {
+  delete: (id, workspaceId, projectId) =>
+    request(`/tasks/${id}?${new URLSearchParams({ workspaceId, projectId })}`, {
+      method: "DELETE",
+    }),
+
+  addComment: (id, text, workspaceId, projectId) =>
+    request(`/tasks/${id}/comments?${new URLSearchParams({ workspaceId, projectId })}`, {
+      method: "POST",
+      body: JSON.stringify({ text }),
+    }),
+
+  getContext: (id, workspaceId, projectId) =>
+    request(`/tasks/${id}/context?${new URLSearchParams({ workspaceId, projectId })}`),
+
+  addPullRequest: (id, url, workspaceId, projectId) =>
+    request(`/tasks/${id}/github-prs?${new URLSearchParams({ workspaceId, projectId })}`, {
+      method: "POST", body: JSON.stringify({ url }),
+    }),
+
+  updatePullRequest: (id, pullRequestId, url, workspaceId, projectId) =>
+    request(`/tasks/${id}/github-prs/${pullRequestId}?${new URLSearchParams({ workspaceId, projectId })}`, {
+      method: "PUT", body: JSON.stringify({ url }),
+    }),
+
+  removePullRequest: (id, pullRequestId, workspaceId, projectId) =>
+    request(`/tasks/${id}/github-prs/${pullRequestId}?${new URLSearchParams({ workspaceId, projectId })}`, {
       method: "DELETE",
     }),
 };
@@ -195,9 +232,19 @@ export const discussionAPI = {
 
 // Existing decision API
 export const decisionAPI = {
-  getAll: () => request("/decisions"),
+  getAll: (workspaceId, projectId) => {
+    const params = new URLSearchParams();
+    if (workspaceId) params.set("workspaceId", workspaceId);
+    if (projectId) params.set("projectId", projectId);
+    return request(`/decisions?${params}`);
+  },
 
-  getTrash: () => request("/decisions/trash"),
+  getTrash: (workspaceId, projectId) => {
+    const params = new URLSearchParams();
+    if (workspaceId) params.set("workspaceId", workspaceId);
+    if (projectId) params.set("projectId", projectId);
+    return request(`/decisions/trash?${params}`);
+  },
 
   create: (decision) =>
     request("/decisions", {
@@ -229,28 +276,61 @@ export const decisionAPI = {
     }),
 };
 
+export const notificationAPI = {
+  getAll: (workspaceId, projectId, options = {}) => {
+    const params = new URLSearchParams({ workspaceId, projectId, limit: String(options.limit || 30) });
+    if (options.before) params.set("before", options.before);
+    return request(`/notifications?${params}`);
+  },
+  markRead: (id, workspaceId, projectId) => request(`/notifications/${id}/read?${new URLSearchParams({ workspaceId, projectId })}`, { method: "PATCH" }),
+  markAllRead: (workspaceId, projectId) => request(`/notifications/read-all?${new URLSearchParams({ workspaceId, projectId })}`, { method: "PATCH" }),
+};
+
+export const activityAPI = {
+  getAll: (workspaceId, projectId, options = {}) => {
+    const params = new URLSearchParams({ workspaceId, projectId, limit: String(options.limit || 30) });
+    if (options.before) params.set("before", options.before);
+    return request(`/activity?${params}`);
+  },
+};
+
+export const searchAPI = {
+  search: (workspaceId, projectId, filters) => {
+    const params = new URLSearchParams({ workspaceId, projectId });
+    Object.entries(filters).forEach(([key, value]) => { if (value) params.set(key, value); });
+    return request(`/search?${params}`);
+  },
+};
+
+export const aiSuggestionAPI = {
+  getAll: (workspaceId, projectId) => request(`/ai-suggestions?${new URLSearchParams({ workspaceId, projectId })}`),
+  create: (payload) => request("/ai-suggestions", { method: "POST", body: JSON.stringify(payload) }),
+  update: (id, workspaceId, projectId, payload) => request(`/ai-suggestions/${id}?${new URLSearchParams({ workspaceId, projectId })}`, { method: "PATCH", body: JSON.stringify(payload) }),
+  approve: (id, workspaceId, projectId, payload) => request(`/ai-suggestions/${id}/approve?${new URLSearchParams({ workspaceId, projectId })}`, { method: "POST", body: JSON.stringify(payload) }),
+  reject: (id, workspaceId, projectId) => request(`/ai-suggestions/${id}/reject?${new URLSearchParams({ workspaceId, projectId })}`, { method: "POST" }),
+  expire: (id, workspaceId, projectId) => request(`/ai-suggestions/${id}/expire?${new URLSearchParams({ workspaceId, projectId })}`, { method: "POST" }),
+};
+
 // Existing file upload API
 export const uploadAPI = {
-  uploadFiles: (files) => {
+  uploadFiles: (files, workspaceId, projectId) => {
     const formData = new FormData();
 
     Array.from(files).forEach((file) => {
       formData.append("files", file);
     });
 
-    return request("/uploads", {
+    const scope = new URLSearchParams({ workspaceId, projectId });
+    return request(`/uploads?${scope}`, {
       method: "POST",
       body: formData,
     });
   },
 };
 
-export const getAttachmentURL = (url) => {
-  if (!url) return "#";
-
-  if (url.startsWith("http://") || url.startsWith("https://")) {
-    return url;
-  }
-
-  return `${API_ORIGIN}${url.startsWith("/") ? "" : "/"}${url}`;
+export const getAttachmentURL = (url, uploadId) => {
+  if (typeof url !== "string" || typeof uploadId !== "string" || !/^[a-f\d]{24}$/i.test(uploadId)) return null;
+  const match = url.match(/^\/api\/uploads\/file\/([a-f\d]{24})$/i);
+  if (!match || match[1].toLowerCase() !== uploadId.toLowerCase()) return null;
+  return `${API_ORIGIN}/api/uploads/file/${match[1]}`;
 };

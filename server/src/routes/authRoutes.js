@@ -3,8 +3,12 @@ const express = require("express");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
+const { createRateLimiter } = require("../utils/rateLimiter");
+const { validateLoginBody, validateRegistrationBody } = require("../utils/authValidation");
 
 const router = express.Router();
+const registrationRateLimit = createRateLimiter({ limit: 5, windowMs: 60 * 60 * 1000 });
+const loginRateLimit = createRateLimiter({ limit: 10, windowMs: 15 * 60 * 1000 });
 
 // Generate JWT
 const generateToken = (userId) => {
@@ -16,25 +20,11 @@ const generateToken = (userId) => {
 };
 
 // POST /api/auth/register
-router.post("/register", async (req, res) => {
+router.post("/register", registrationRateLimit, async (req, res) => {
   try {
-    const { name, email, password } = req.body;
-
-    if (!name || !email || !password) {
-      return res.status(400).json({
-        success: false,
-        message: "Name, email, and password are required.",
-      });
-    }
-
-    if (password.length < 8) {
-      return res.status(400).json({
-        success: false,
-        message: "Password must be at least 8 characters long.",
-      });
-    }
-
-    const normalizedEmail = email.trim().toLowerCase();
+    const input = validateRegistrationBody(req.body);
+    if (input.error) return res.status(400).json({ success: false, message: input.error });
+    const { name, email: normalizedEmail, password } = input.value;
 
     const existingUser = await User.findOne({
       email: normalizedEmail,
@@ -43,14 +33,14 @@ router.post("/register", async (req, res) => {
     if (existingUser) {
       return res.status(409).json({
         success: false,
-        message: "An account with this email already exists.",
+        message: "Unable to create an account with those details.",
       });
     }
 
     const hashedPassword = await bcrypt.hash(password, 12);
 
     const user = await User.create({
-      name: name.trim(),
+      name,
       email: normalizedEmail,
       password: hashedPassword,
     });
@@ -74,7 +64,7 @@ router.post("/register", async (req, res) => {
     if (error.code === 11000) {
       return res.status(409).json({
         success: false,
-        message: "An account with this email already exists.",
+        message: "Unable to create an account with those details.",
       });
     }
 
@@ -86,18 +76,11 @@ router.post("/register", async (req, res) => {
 });
 
 // POST /api/auth/login
-router.post("/login", async (req, res) => {
+router.post("/login", loginRateLimit, async (req, res) => {
   try {
-    const { email, password } = req.body;
-
-    if (!email || !password) {
-      return res.status(400).json({
-        success: false,
-        message: "Email and password are required.",
-      });
-    }
-
-    const normalizedEmail = email.trim().toLowerCase();
+    const input = validateLoginBody(req.body);
+    if (input.error) return res.status(400).json({ success: false, message: input.error });
+    const { email: normalizedEmail, password } = input.value;
 
     // Password is excluded by default in the User model.
     const user = await User.findOne({

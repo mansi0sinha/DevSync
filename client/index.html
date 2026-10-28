@@ -10,12 +10,11 @@
   (() => {
     try {
       const savedTheme = localStorage.getItem("devsync-theme");
-      const theme = savedTheme === "dark" ? "dark" : "light";
+      const systemPrefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+      const useDarkTheme = savedTheme === "dark" ||
+        (savedTheme === "system" && systemPrefersDark);
 
-      document.documentElement.classList.toggle(
-        "dark",
-        theme === "dark"
-      );
+      document.documentElement.classList.toggle("dark", useDarkTheme);
     } catch (error) {
       console.error("Could not restore DevSync theme:", error);
     }

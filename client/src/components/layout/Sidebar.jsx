@@ -1,10 +1,12 @@
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   LayoutDashboard,
   MessageSquare,
   Columns3,
   GitMerge,
+  Activity,
+  Sparkles,
   Settings,
   ChevronsUpDown,
   Plus,
@@ -18,6 +20,8 @@ const navigation = [
   { name: "Discussion", icon: MessageSquare, id: "discussion" },
   { name: "Board", icon: Columns3, id: "board" },
   { name: "Decisions", icon: GitMerge, id: "decisions" },
+  { name: "Activity", icon: Activity, id: "activity" },
+  { name: "AI Suggestions", icon: Sparkles, id: "ai-suggestions" },
 ];
 
 export default function Sidebar({
@@ -26,25 +30,6 @@ export default function Sidebar({
   onCollapseChange,
 }) {
   const [isCollapsed, setIsCollapsed] = useState(false);
-
-  const [isDark, setIsDark] = useState(() =>
-    document.documentElement.classList.contains("dark")
-  );
-
-  useEffect(() => {
-    const observer = new MutationObserver(() => {
-      setIsDark(
-        document.documentElement.classList.contains("dark")
-      );
-    });
-
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["class"],
-    });
-
-    return () => observer.disconnect();
-  }, []);
 
   const toggleSidebar = () => {
     setIsCollapsed((current) => {
@@ -72,7 +57,12 @@ export default function Sidebar({
           <img
             src="/devsync-mark-light.svg"
             alt="DevSync logo"
-            className="h-10 w-10 shrink-0 object-contain"
+            className="h-10 w-10 shrink-0 object-contain dark:hidden"
+          />
+          <img
+            src="/devsync-mark-dark.svg"
+            alt="DevSync logo"
+            className="hidden h-10 w-10 shrink-0 object-contain dark:block"
           />
 
           {!isCollapsed && (

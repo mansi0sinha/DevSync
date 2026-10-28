@@ -1,6 +1,9 @@
 
+import { useEffect, useState } from "react";
 import ThemeToggle from "../ui/ThemeToggle";
-import { Search, Bell, PanelLeft } from "lucide-react";
+import { Search, PanelLeft } from "lucide-react";
+import { getRealtimeStatus, subscribeRealtime, subscribeRealtimeStatus } from "../../services/realtime";
+import NotificationPanel from "./NotificationPanel";
 
 const pageTitles = {
   dashboard: "Overview",
@@ -8,56 +11,76 @@ const pageTitles = {
   board: "Task Board",
   decisions: "Decision Log",
   settings: "Settings",
+  activity: "Activity",
+  search: "Search",
+  "ai-suggestions": "AI Suggestions",
 };
 
-export default function Header({ activePage = "dashboard" }) {
+export default function Header({ activePage = "dashboard", workspaceId, projectId, onNavigate, onOpenTask, onOpenDecision, onOpenDiscussion }) {
+  const [realtimeStatus, setRealtimeStatus] = useState(getRealtimeStatus());
+  const [onlineCount, setOnlineCount] = useState(0);
+
+  useEffect(() => {
+    const unsubscribeStatus = subscribeRealtimeStatus((nextStatus) => {
+      setRealtimeStatus(nextStatus);
+      if (nextStatus !== "connected") setOnlineCount(0);
+    });
+    const unsubscribePresence = subscribeRealtime("project:presence", (presence) => {
+      setOnlineCount(Array.isArray(presence?.users) ? presence.users.length : 0);
+    });
+    return () => {
+      unsubscribeStatus();
+      unsubscribePresence();
+    };
+  }, []);
+
+  const connectionLabel = realtimeStatus === "connected"
+    ? `Connected${onlineCount ? ` · ${onlineCount} online` : ""}`
+    : realtimeStatus === "reconnecting" ? "Reconnecting" : "Disconnected";
+
   return (
-    <header className="flex h-16 shrink-0 items-center justify-between border-b border-line bg-surface px-6">
+    <header className="flex h-16 shrink-0 items-center justify-between border-b border-line bg-surface px-3 sm:px-6">
       {/* Current page */}
-      <div className="flex items-center gap-3">
+      <div className="flex min-w-0 items-center gap-2 sm:gap-3">
         <PanelLeft
           size={18}
           strokeWidth={1.8}
-          className="text-muted"
+          className="hidden shrink-0 text-muted sm:block"
         />
 
-        <div className="h-5 w-px bg-line" />
+        <div className="hidden h-5 w-px bg-line sm:block" />
 
-        <div className="flex items-center gap-2 text-sm">
-          <span className="text-muted">Workspace</span>
-          <span className="text-muted">/</span>
+        <div className="flex min-w-0 items-center gap-2 text-sm">
+          <span className="hidden text-muted md:inline">Workspace</span>
+          <span className="hidden text-muted md:inline">/</span>
 
-          <span className="font-semibold text-text">
+          <span className="truncate font-semibold text-text">
             {pageTitles[activePage] || "Overview"}
           </span>
         </div>
       </div>
 
       {/* Header actions */}
-      <div className="flex items-center gap-4">
+      <div className="flex shrink-0 items-center gap-2 sm:gap-4">
+        <div className="inline-flex items-center gap-1.5 text-[11px] text-muted" role="status" aria-live="polite" title={`Realtime ${connectionLabel}`}>
+          <span className={`h-2 w-2 rounded-full ${realtimeStatus === "connected" ? "bg-acc" : realtimeStatus === "reconnecting" ? "bg-amb" : "bg-muted"}`} />
+          <span className="hidden sm:inline">{connectionLabel}</span>
+        </div>
         {/* Search */}
         <button
           type="button"
+          onClick={() => onNavigate?.("search")}
           aria-label="Search"
           title="Search"
-          className="rounded-md p-1.5 text-muted transition-colors hover:bg-hover hover:text-text"
+          className="rounded-md p-2 text-muted transition-colors hover:bg-hover hover:text-text"
         >
           <Search size={19} strokeWidth={1.8} />
         </button>
 
         {/* Notifications */}
-        <button
-          type="button"
-          aria-label="Notifications"
-          title="Notifications"
-          className="relative rounded-md p-1.5 text-muted transition-colors hover:bg-hover hover:text-text"
-        >
-          <Bell size={19} strokeWidth={1.8} />
+        <NotificationPanel workspaceId={workspaceId} projectId={projectId} onOpenTask={onOpenTask} onOpenDecision={onOpenDecision} onOpenDiscussion={onOpenDiscussion} />
 
-          <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-acc" />
-        </button>
-
-        <div className="mx-1 h-5 w-px bg-line" />
+        <div className="mx-1 hidden h-5 w-px bg-line sm:block" />
 
         {/* Light / dark mode toggle */}
         <ThemeToggle />

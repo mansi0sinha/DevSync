@@ -9,7 +9,7 @@ const router = express.Router();
 
 // Helper: find a workspace where the current user is a member.
 async function getWorkspaceMembership(workspaceId, userId) {
-  if (!mongoose.Types.ObjectId.isValid(workspaceId)) {
+  if (!mongoose.isObjectIdOrHexString(workspaceId)) {
     return { error: "invalid" };
   }
 
@@ -35,6 +35,9 @@ async function getWorkspaceMembership(workspaceId, userId) {
 router.post("/workspaces/:workspaceId/projects", authMiddleware, async (req, res) => {
   try {
     const { workspaceId } = req.params;
+    if (!req.body || typeof req.body !== "object" || Array.isArray(req.body)) {
+      return res.status(400).json({ success: false, message: "A valid request body is required." });
+    }
     const { name, description } = req.body;
 
     const result = await getWorkspaceMembership(workspaceId, req.user._id);

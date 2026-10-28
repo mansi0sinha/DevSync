@@ -80,6 +80,7 @@ function normalizeDecision(decision, discussions = [], tasks = []) {
     id: getDecisionId(decision._id || decision.id),
     databaseId: String(decision._id || decision.id || ""),
     discussionId,
+    discussionMessageId: decision.discussionMessageId ? String(decision.discussionMessageId) : "",
     discussionTitle: sourceDiscussion?.title || "Linked discussion",
     title: decision.title || "Untitled decision",
     summary: decision.summary || "",
@@ -95,11 +96,10 @@ function normalizeDecision(decision, discussions = [], tasks = []) {
   };
 }
 
-function DecisionModal({ onClose, onCreate, tasks }) {
+function DecisionModal({ onClose, onCreate, tasks, projectName }) {
   const [title, setTitle] = useState("");
   const [summary, setSummary] = useState("");
   const [context, setContext] = useState("");
-  const [project, setProject] = useState("");
   const [linkedTaskId, setLinkedTaskId] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -109,11 +109,6 @@ function DecisionModal({ onClose, onCreate, tasks }) {
 
     if (!title.trim() || !summary.trim() || !context.trim()) {
       setError("Please complete the title, outcome, and context.");
-      return;
-    }
-
-    if (project.trim().length < 2) {
-      setError("Please enter a project name with at least 2 characters.");
       return;
     }
 
@@ -129,7 +124,6 @@ function DecisionModal({ onClose, onCreate, tasks }) {
         title: title.trim(),
         summary: summary.trim(),
         context: context.trim(),
-        project: project.trim(),
         linkedTask: linkedTaskId || null,
         taskId: selectedTask
           ? String(selectedTask._id || selectedTask.id)
@@ -150,8 +144,7 @@ function DecisionModal({ onClose, onCreate, tasks }) {
     !saving &&
     title.trim().length >= 2 &&
     Boolean(summary.trim()) &&
-    Boolean(context.trim()) &&
-    project.trim().length >= 2;
+    Boolean(context.trim());
 
   return (
     <div
@@ -247,24 +240,9 @@ function DecisionModal({ onClose, onCreate, tasks }) {
         />
 
         <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div>
-            <label
-              htmlFor="decision-project"
-              className="mb-1.5 block text-sm font-medium text-text"
-            >
-              Project
-            </label>
-
-            <input
-              id="decision-project"
-              required
-              minLength={2}
-              maxLength={100}
-              value={project}
-              onChange={(event) => setProject(event.target.value)}
-              placeholder="e.g. DevSync"
-              className="w-full rounded-lg border border-line bg-bg px-3 py-2.5 text-sm text-text outline-none placeholder:text-muted focus:border-acc"
-            />
+          <div className="rounded-lg border border-line bg-bg p-3">
+            <p className="mb-1.5 text-sm font-medium text-text">Project</p>
+            <p className="text-sm text-muted">{projectName || "Selected project"}</p>
           </div>
 
           <div>
@@ -336,7 +314,7 @@ function DecisionModal({ onClose, onCreate, tasks }) {
   );
 }
 
-export default function Decisions() {
+export default function Decisions({ workspaceId, projectId, workspace, project, onOpenDiscussion }) {
   const [decisions, setDecisions] = useState([]);
   const [tasks, setTasks] = useState([]);
   const [search, setSearch] = useState("");
@@ -347,19 +325,41 @@ export default function Decisions() {
   const [loading, setLoading] = useState(true);
   const [pageError, setPageError] = useState("");
   const [savingStatus, setSavingStatus] = useState(false);
+  const [showSupersedeModal, setShowSupersedeModal] = useState(false);
+  const [replacementDecisionId, setReplacementDecisionId] = useState("");
+  const [isTrashView, setIsTrashView] = useState(false);
+  const [pendingTrashDecision, setPendingTrashDecision] = useState(null);
 
   const loadDecisions = useCallback(async () => {
+    if (!workspaceId || !projectId) {
+      setDecisions([]);
+      setTasks([]);
+      setSelectedDecisionId("");
+      setLoading(false);
+      setPageError("");
+      return;
+    }
     setLoading(true);
     setPageError("");
 
     try {
       const [decisionResponse, discussionResponse] = await Promise.all([
-        decisionAPI.getAll(),
-        discussionAPI.getAll(),
+        isTrashView ? decisionAPI.getTrash(workspaceId, projectId) : decisionAPI.getAll(workspaceId, projectId),
+        discussionAPI.getAll(workspaceId, projectId),
       ]);
 
-      const savedRecords = getResponseData(decisionResponse);
+      let savedRecords = getResponseData(decisionResponse);
       const discussions = getResponseData(discussionResponse);
+
+      const requestedDecisionId = sessionStorage.getItem("devsync_decision_focus");
+      if (!isTrashView && requestedDecisionId && Array.isArray(savedRecords) && !savedRecords.some((item) => String(item._id || item.id) === requestedDecisionId)) {
+        const trashResponse = await decisionAPI.getTrash(workspaceId, projectId);
+        const trashRecords = getResponseData(trashResponse);
+        if (Array.isArray(trashRecords) && trashRecords.some((item) => String(item._id || item.id) === requestedDecisionId)) {
+          savedRecords = trashRecords;
+          setIsTrashView(true);
+        }
+      }
 
       if (!Array.isArray(savedRecords) || !Array.isArray(discussions)) {
         throw new Error("The server returned an unexpected decisions response.");
@@ -369,7 +369,7 @@ export default function Decisions() {
       let availableTasks = [];
 
       try {
-        const taskResponse = await taskAPI.getAll();
+        const taskResponse = await taskAPI.getAll(workspaceId, projectId);
         const taskRecords = getResponseData(taskResponse);
 
         if (Array.isArray(taskRecords)) {
@@ -389,7 +389,15 @@ export default function Decisions() {
 
       setDecisions(savedDecisions);
 
+      const requestedDecision = savedDecisions.find((item) => item.databaseId === requestedDecisionId);
+      if (requestedDecision) {
+        setSelectedDecisionId(requestedDecision.databaseId);
+        setShowDecisionDetail(true);
+      }
+      sessionStorage.removeItem("devsync_decision_focus");
+
       setSelectedDecisionId((currentId) => {
+        if (requestedDecision) return requestedDecision.databaseId;
         if (
           savedDecisions.some(
             (decision) => decision.databaseId === currentId
@@ -408,7 +416,7 @@ export default function Decisions() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [workspaceId, projectId, isTrashView]);
 
   useEffect(() => {
     loadDecisions();
@@ -459,8 +467,9 @@ export default function Decisions() {
     // Create the source discussion first to preserve the decision's history link.
     const discussionResponse = await discussionAPI.create({
       title: `Decision: ${data.title}`,
-      project: data.project,
-      taskId: data.taskId,
+      workspaceId,
+      projectId,
+      linkedTask: data.linkedTask || null,
       message:
         data.context ||
         data.summary ||
@@ -469,8 +478,9 @@ export default function Decisions() {
 
     const createdDiscussion = getResponseData(discussionResponse);
     const discussionId = createdDiscussion?._id || createdDiscussion?.id;
+    const discussionMessageId = createdDiscussion?.messages?.[0]?._id || createdDiscussion?.messages?.[0]?.id;
 
-    if (!discussionId) {
+    if (!discussionId || !discussionMessageId) {
       throw new Error(
         "The discussion was created, but the server did not return its ID."
       );
@@ -481,11 +491,12 @@ export default function Decisions() {
       title: data.title,
       summary: data.summary,
       context: data.context,
-      project: data.project,
+      workspaceId,
+      projectId,
       taskId: data.taskId,
       linkedTask: data.linkedTask || null,
       discussionId,
-      createdBy: "Mansi Sinha",
+      discussionMessageId,
     });
 
     const savedRecord = getResponseData(decisionResponse);
@@ -500,6 +511,7 @@ export default function Decisions() {
       {
         ...savedRecord,
         discussionId,
+        discussionMessageId,
         linkedTask:
           savedRecord.linkedTask ||
           (data.linkedTask
@@ -563,6 +575,7 @@ export default function Decisions() {
               ? updatedRecord.discussionId?._id
               : updatedRecord.discussionId ||
                 selectedDecision.discussionId,
+          discussionMessageId: updatedRecord.discussionMessageId || selectedDecision.discussionMessageId,
         },
         [],
         tasks
@@ -586,12 +599,59 @@ export default function Decisions() {
     }
   }
 
+  async function supersedeDecision() {
+    if (!selectedDecision?.databaseId || !replacementDecisionId || savingStatus) return;
+    try {
+      setSavingStatus(true);
+      setPageError("");
+      await decisionAPI.supersede(selectedDecision.databaseId, replacementDecisionId);
+      setDecisions((current) => current.map((item) => item.databaseId === selectedDecision.databaseId
+        ? { ...item, status: "Superseded", supersededBy: replacementDecisionId }
+        : item));
+      setShowSupersedeModal(false);
+      setReplacementDecisionId("");
+    } catch (error) {
+      setPageError(error.message || "Could not supersede this decision.");
+    } finally {
+      setSavingStatus(false);
+    }
+  }
+
+  async function trashDecision() {
+    if (!pendingTrashDecision) return;
+    try {
+      setSavingStatus(true);
+      await decisionAPI.delete(pendingTrashDecision.databaseId);
+      setDecisions((current) => current.filter((item) => item.databaseId !== pendingTrashDecision.databaseId));
+      setSelectedDecisionId("");
+      setPendingTrashDecision(null);
+    } catch (error) {
+      setPageError(error.message || "Could not move this decision to the Recycle Bin.");
+    } finally {
+      setSavingStatus(false);
+    }
+  }
+
+  async function restoreDecision() {
+    if (!selectedDecision?.databaseId) return;
+    try {
+      setSavingStatus(true);
+      await decisionAPI.restore(selectedDecision.databaseId);
+      setDecisions((current) => current.filter((item) => item.databaseId !== selectedDecision.databaseId));
+      setSelectedDecisionId("");
+    } catch (error) {
+      setPageError(error.message || "Could not restore this decision.");
+    } finally {
+      setSavingStatus(false);
+    }
+  }
+
   return (
     <div className="mx-auto w-full max-w-[1600px] space-y-6 pb-8">
       {/* Header */}
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
         <div>
-          <p className="mb-2 text-sm text-muted">Workspace / Engineering</p>
+          <p className="mb-2 text-sm text-muted">{workspace?.name || "Workspace"} / {project?.name || "Project"}</p>
 
           <h1 className="text-2xl font-semibold tracking-tight text-text sm:text-3xl">
             Decision Log
@@ -603,10 +663,10 @@ export default function Decisions() {
           </p>
         </div>
 
-        <Button onClick={() => setShowModal(true)}>
-          <Plus size={17} />
-          Record decision
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="secondary" onClick={() => setIsTrashView((value) => !value)}>{isTrashView ? "Back to decisions" : "Recycle Bin"}</Button>
+          {!isTrashView && <Button onClick={() => setShowModal(true)}><Plus size={17} />Record decision</Button>}
+        </div>
       </div>
 
       {/* Error */}
@@ -703,7 +763,7 @@ export default function Decisions() {
         {/* Decision list */}
         <section className="overflow-hidden rounded-xl border border-line bg-surface">
           <div className="flex items-center justify-between border-b border-line px-5 py-4">
-            <h2 className="text-sm font-semibold text-text">All decisions</h2>
+            <h2 className="text-sm font-semibold text-text">{isTrashView ? "Recycle Bin" : "All decisions"}</h2>
 
             <span className="font-mono text-xs text-muted">
               {loading ? "…" : filteredDecisions.length}
@@ -722,18 +782,18 @@ export default function Decisions() {
               </div>
 
               <h3 className="text-sm font-semibold text-text">
-                {search || projectFilter !== "All projects"
+                {isTrashView ? "The Recycle Bin is empty" : search || projectFilter !== "All projects"
                   ? "No matching decisions"
                   : "No decisions yet"}
               </h3>
 
               <p className="mt-2 max-w-sm text-sm leading-5 text-muted">
-                {search || projectFilter !== "All projects"
+                {isTrashView ? "Deleted decisions are kept here until restored." : search || projectFilter !== "All projects"
                   ? "Try changing your search or project filter."
                   : "Record your first decision to keep important engineering choices and their reasoning in one place."}
               </p>
 
-              {!search && projectFilter === "All projects" && (
+              {!isTrashView && !search && projectFilter === "All projects" && (
                 <Button
                   className="mt-4"
                   onClick={() => setShowModal(true)}
@@ -942,7 +1002,7 @@ export default function Decisions() {
                   </div>
                 </div>
 
-                <div>
+                {!isTrashView && <div>
                   <h4 className="mb-2 text-sm font-semibold text-text">
                     Decision status
                   </h4>
@@ -972,7 +1032,15 @@ export default function Decisions() {
                       Updating status...
                     </p>
                   )}
-                </div>
+                  {selectedDecision.status !== "Superseded" && decisions.some((item) => item.databaseId !== selectedDecision.databaseId && item.status !== "Archived") && (
+                    <Button className="mt-3" variant="secondary" onClick={() => setShowSupersedeModal(true)}>
+                      Supersede with another decision
+                    </Button>
+                  )}
+                  <Button className="mt-3" variant="secondary" onClick={() => setPendingTrashDecision(selectedDecision)}>Move to Recycle Bin</Button>
+                </div>}
+
+                {isTrashView && <Button disabled={savingStatus} variant="secondary" onClick={restoreDecision}>{savingStatus ? "Restoring..." : "Restore decision"}</Button>}
 
                 <div className="rounded-lg border border-line p-4">
                   <div className="flex items-start gap-3">
@@ -993,6 +1061,15 @@ export default function Decisions() {
                       <p className="mt-2 wrap-break-word font-mono text-xs text-muted">
                         {selectedDecision.discussionTitle}
                       </p>
+                      {selectedDecision.discussionId && (
+                        <button
+                          type="button"
+                          onClick={() => onOpenDiscussion?.(selectedDecision.discussionId, selectedDecision.discussionMessageId)}
+                          className="mt-3 text-xs font-medium text-acc underline underline-offset-2"
+                        >
+                          {selectedDecision.discussionMessageId ? "Open source message" : "Open source discussion"}
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -1014,9 +1091,35 @@ export default function Decisions() {
       {showModal && (
         <DecisionModal
           tasks={tasks}
+          projectName={project?.name}
           onClose={() => setShowModal(false)}
           onCreate={createDecision}
         />
+      )}
+      {showSupersedeModal && selectedDecision && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !savingStatus) setShowSupersedeModal(false); }}>
+          <section role="dialog" aria-modal="true" aria-labelledby="supersede-title" className="w-full max-w-md rounded-xl border border-line bg-surface p-6 shadow-xl">
+            <h2 id="supersede-title" className="text-lg font-semibold text-text">Supersede decision</h2>
+            <p className="mt-2 text-sm text-muted">Choose the decision that replaces “{selectedDecision.title}”.</p>
+            <select value={replacementDecisionId} onChange={(event) => setReplacementDecisionId(event.target.value)} className="mt-4 h-10 w-full rounded-lg border border-line bg-bg px-3 text-sm text-text" aria-label="Replacement decision">
+              <option value="">Select replacement</option>
+              {decisions.filter((item) => item.databaseId !== selectedDecision.databaseId && item.status !== "Archived").map((item) => <option key={item.databaseId} value={item.databaseId}>{item.title}</option>)}
+            </select>
+            <div className="mt-5 flex justify-end gap-2">
+              <Button variant="secondary" disabled={savingStatus} onClick={() => setShowSupersedeModal(false)}>Cancel</Button>
+              <Button disabled={savingStatus || !replacementDecisionId} onClick={supersedeDecision}>{savingStatus ? "Saving..." : "Confirm supersede"}</Button>
+            </div>
+          </section>
+        </div>
+      )}
+      {pendingTrashDecision && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !savingStatus) setPendingTrashDecision(null); }}>
+          <section role="alertdialog" aria-modal="true" aria-labelledby="trash-decision-title" className="w-full max-w-md rounded-xl border border-line bg-surface p-6 shadow-xl">
+            <h2 id="trash-decision-title" className="text-lg font-semibold text-text">Move decision to the Recycle Bin?</h2>
+            <p className="mt-2 text-sm text-muted">“{pendingTrashDecision.title}” can be restored later.</p>
+            <div className="mt-5 flex justify-end gap-2"><Button variant="secondary" disabled={savingStatus} onClick={() => setPendingTrashDecision(null)}>Cancel</Button><Button variant="danger" disabled={savingStatus} onClick={trashDecision}>{savingStatus ? "Moving..." : "Move to Recycle Bin"}</Button></div>
+          </section>
+        </div>
       )}
     </div>
   );

@@ -9,8 +9,14 @@ import Dashboard from "./pages/Dashboard";
 import Board from "./pages/Board";
 import Decisions from "./pages/Decisions";
 import Settings from "./pages/Settings";
+import Activity from "./pages/Activity";
+import Search from "./pages/Search";
+import AISuggestions from "./pages/AISuggestions";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
+import { WorkspaceDialog, WorkspaceOnboarding } from "./components/workspaces/WorkspaceDialogs";
+import ThemeToggle from "./components/ui/ThemeToggle";
+import { connectRealtime, disconnectRealtime } from "./services/realtime";
 
 import {
   authAPI,
@@ -27,6 +33,9 @@ const protectedPages = [
   "discussion",
   "decisions",
   "settings",
+  "activity",
+  "search",
+  "ai-suggestions",
 ];
 
 const publicPages = ["login", "register"];
@@ -59,10 +68,21 @@ function App() {
   const [workspaceId, setWorkspaceId] = useState("");
   const [projectId, setProjectId] = useState("");
 
-  const [loadingWorkspaces, setLoadingWorkspaces] = useState(false);
+  const [loadingWorkspaces, setLoadingWorkspaces] = useState(Boolean(getToken()));
   const [loadingProjects, setLoadingProjects] = useState(false);
   const [workspaceError, setWorkspaceError] = useState("");
   const [projectError, setProjectError] = useState("");
+  const [dialogType, setDialogType] = useState("");
+  const [workspaceLoadAttempt, setWorkspaceLoadAttempt] = useState(0);
+  const [projectLoadAttempt, setProjectLoadAttempt] = useState(0);
+
+  useEffect(() => {
+    if (!user || !workspaceId || !projectId || !getToken()) {
+      disconnectRealtime();
+      return undefined;
+    }
+    return connectRealtime({ workspaceId, projectId });
+  }, [user, workspaceId, projectId]);
 
   const navigate = useCallback((page, options = {}) => {
     if (!validPages.includes(page)) return;
@@ -79,12 +99,16 @@ function App() {
   }, []);
 
   const handleLogout = useCallback(() => {
+    disconnectRealtime();
     clearSession();
     setUser(null);
     setWorkspaces([]);
     setProjects([]);
     setWorkspaceId("");
     setProjectId("");
+    localStorage.removeItem("devsync_workspace_id");
+    Object.keys(localStorage).filter((key) => key.startsWith("devsync_project_"))
+      .forEach((key) => localStorage.removeItem(key));
     navigate("login", { replace: true });
   }, [navigate]);
 
@@ -109,6 +133,7 @@ function App() {
         }
       } catch {
         if (!cancelled) {
+          disconnectRealtime();
           clearSession();
           setUser(null);
         }
@@ -133,11 +158,15 @@ function App() {
     }
 
     function handleSessionExpired() {
+      disconnectRealtime();
       setUser(null);
       setWorkspaces([]);
       setProjects([]);
       setWorkspaceId("");
       setProjectId("");
+      localStorage.removeItem("devsync_workspace_id");
+      Object.keys(localStorage).filter((key) => key.startsWith("devsync_project_"))
+        .forEach((key) => localStorage.removeItem(key));
       navigate("login", { replace: true });
     }
 
@@ -187,12 +216,16 @@ function App() {
         if (cancelled) return;
 
         setWorkspaces(list);
+        const savedWorkspaceId = localStorage.getItem("devsync_workspace_id");
+        if (savedWorkspaceId && !list.some((item) => getItemId(item) === savedWorkspaceId)) {
+          localStorage.removeItem("devsync_workspace_id");
+        }
 
         setWorkspaceId((currentId) => {
-          if (list.some((item) => getItemId(item) === currentId)) {
-            return currentId;
-          }
-          return getItemId(list[0]);
+          const requestedId = currentId || savedWorkspaceId;
+          return list.some((item) => getItemId(item) === requestedId)
+            ? requestedId
+            : getItemId(list[0]);
         });
       } catch (error) {
         if (!cancelled) {
@@ -201,6 +234,9 @@ function App() {
           setWorkspaceId("");
           setProjectId("");
           setWorkspaceError(error.message || "Could not load workspaces.");
+          localStorage.removeItem("devsync_workspace_id");
+          Object.keys(localStorage).filter((key) => key.startsWith("devsync_project_"))
+            .forEach((key) => localStorage.removeItem(key));
         }
       } finally {
         if (!cancelled) setLoadingWorkspaces(false);
@@ -212,7 +248,11 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, [user?._id, user?.id, user?.email]);
+  }, [user?._id, user?.id, user?.email, workspaceLoadAttempt]);
+
+  useEffect(() => {
+    if (workspaceId) localStorage.setItem("devsync_workspace_id", workspaceId);
+  }, [workspaceId]);
 
   // Load projects whenever the selected workspace changes.
   useEffect(() => {
@@ -238,7 +278,10 @@ function App() {
         if (cancelled) return;
 
         setProjects(list);
-        setProjectId(getItemId(list[0]));
+        const savedId = localStorage.getItem(`devsync_project_${workspaceId}`);
+        const validSavedId = list.some((item) => getItemId(item) === savedId);
+        if (savedId && !validSavedId) localStorage.removeItem(`devsync_project_${workspaceId}`);
+        setProjectId(validSavedId ? savedId : getItemId(list[0]));
       } catch (error) {
         if (!cancelled) {
           setProjects([]);
@@ -255,83 +298,75 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, [workspaceId]);
+  }, [workspaceId, projectLoadAttempt]);
+
+  useEffect(() => {
+    if (workspaceId && projectId) localStorage.setItem(`devsync_project_${workspaceId}`, projectId);
+  }, [workspaceId, projectId]);
 
   function handleLogin(loggedInUser) {
     setUser(loggedInUser || getSavedUser());
   }
 
-  async function handleCreateWorkspace() {
-    const name = window.prompt("Enter a name for your new workspace:");
-    if (!name?.trim()) return;
-
+  async function handleCreateWorkspace(data) {
     setWorkspaceError("");
-
-    try {
-      const result = await workspaceAPI.create({ name: name.trim() });
-      const created = result.workspace || result.data?.workspace || result;
-
-      if (!getItemId(created)) {
-        const refreshed = await workspaceAPI.getAll();
-        const list = getList(refreshed, "workspaces");
-        setWorkspaces(list);
-
-        const matching = list.find(
-          (item) => item.name === name.trim()
-        );
-
-        if (matching) setWorkspaceId(getItemId(matching));
-        return;
-      }
-
-      setWorkspaces((current) => [
-        ...current.filter((item) => getItemId(item) !== getItemId(created)),
-        created,
-      ]);
-      setWorkspaceId(getItemId(created));
-    } catch (error) {
-      setWorkspaceError(error.message || "Could not create workspace.");
-    }
+    const result = await workspaceAPI.create(data);
+    const created = result.workspace || result.data?.workspace || result;
+    if (!getItemId(created)) throw new Error("Workspace was created, but its ID was not returned.");
+    setWorkspaces((current) => [...current.filter((item) => getItemId(item) !== getItemId(created)), created]);
+    setProjects([]);
+    setWorkspaceId(getItemId(created));
+    setProjectId("");
+    setDialogType("");
+    navigate("dashboard");
   }
 
-  async function handleCreateProject() {
+  async function handleCreateProject(data) {
     if (!workspaceId) {
-      setProjectError("Create or select a workspace first.");
-      return;
+      throw new Error("Create or select a workspace first.");
     }
-
-    const name = window.prompt("Enter a name for your new project:");
-    if (!name?.trim()) return;
-
     setProjectError("");
+    const result = await projectAPI.create(workspaceId, data);
+    const created = result.project || result.data?.project || result;
+    if (!getItemId(created)) throw new Error("Project was created, but its ID was not returned.");
+    setProjects((current) => [...current.filter((item) => getItemId(item) !== getItemId(created)), created]);
+    setProjectId(getItemId(created));
+    setDialogType("");
+    navigate("dashboard");
+  }
 
-    try {
-      const result = await projectAPI.create(workspaceId, {
-        name: name.trim(),
-      });
-      const created = result.project || result.data?.project || result;
+  async function handleJoinWorkspace(token) {
+    const joined = await workspaceAPI.acceptInvitation(token);
+    const result = await workspaceAPI.getAll();
+    const list = getList(result, "workspaces");
+    setWorkspaces(list);
+    setProjects([]);
+    setProjectId("");
+    const joinedId = getItemId(joined.workspace);
+    setWorkspaceId(list.some((item) => getItemId(item) === joinedId) ? joinedId : getItemId(list[0]));
+    setDialogType("");
+    navigate("dashboard");
+  }
 
-      if (!getItemId(created)) {
-        const refreshed = await projectAPI.getAll(workspaceId);
-        const list = getList(refreshed, "projects");
-        setProjects(list);
+  async function handleInviteMember(email) {
+    if (!workspaceId) throw new Error("Select a workspace first.");
+    return workspaceAPI.createInvitation(workspaceId, email);
+  }
 
-        const matching = list.find(
-          (item) => item.name === name.trim()
-        );
+  function openDecisionContext(decisionId) {
+    if (decisionId) sessionStorage.setItem("devsync_decision_focus", decisionId);
+    navigate("decisions");
+  }
 
-        if (matching) setProjectId(getItemId(matching));
-        return;
-      }
+  function openDiscussionContext(discussionId, messageId = "") {
+    if (discussionId) sessionStorage.setItem("devsync_discussion_focus", discussionId);
+    if (messageId) sessionStorage.setItem("devsync_message_focus", messageId);
+    navigate("discussion");
+  }
 
-      setProjects((current) => [
-        ...current.filter((item) => getItemId(item) !== getItemId(created)),
-        created,
-      ]);
-      setProjectId(getItemId(created));
-    } catch (error) {
-      setProjectError(error.message || "Could not create project.");
-    }
+  function openTaskContext(taskId) {
+    if (taskId) sessionStorage.setItem("devsync_task_focus", taskId);
+    navigate("board");
   }
 
   function renderPage() {
@@ -341,6 +376,15 @@ function App() {
 
     if (activePage === "register") {
       return <Register onNavigate={navigate} onLogin={handleLogin} />;
+    }
+
+    if (!workspaceId || !projectId) {
+      return (
+        <section className="mx-auto mt-8 max-w-2xl rounded-xl border border-line bg-surface p-6 text-center">
+          <h1 className="text-lg font-semibold">Select a project to continue</h1>
+          <p className="mt-2 text-sm text-muted">Choose a project for the selected workspace, or create one to open its dashboard and project tools.</p>
+        </section>
+      );
     }
 
     switch (activePage) {
@@ -353,6 +397,7 @@ function App() {
       case "board":
         return (
           <Board
+            key={`${workspaceId}:${projectId}`}
             workspaceId={workspaceId}
             projectId={projectId}
             workspace={workspaces.find(
@@ -361,6 +406,8 @@ function App() {
             project={projects.find(
               (item) => getItemId(item) === projectId
             )}
+            onOpenDecision={openDecisionContext}
+            onOpenDiscussion={openDiscussionContext}
           />
         );
       case "discussion":
@@ -374,6 +421,8 @@ function App() {
             project={projects.find(
               (item) => getItemId(item) === projectId
             )}
+            onOpenDecision={openDecisionContext}
+            onOpenDiscussion={openDiscussionContext}
           />
         );
       case "decisions":
@@ -381,10 +430,19 @@ function App() {
           <Decisions
             workspaceId={workspaceId}
             projectId={projectId}
+            workspace={workspaces.find((item) => getItemId(item) === workspaceId)}
+            project={projects.find((item) => getItemId(item) === projectId)}
+            onOpenDiscussion={openDiscussionContext}
           />
         );
       case "settings":
         return <Settings />;
+      case "activity":
+        return <Activity key={`${workspaceId}:${projectId}`} workspaceId={workspaceId} projectId={projectId} onOpenTask={openTaskContext} onOpenDecision={openDecisionContext} onOpenDiscussion={openDiscussionContext} />;
+      case "search":
+        return <Search key={`${workspaceId}:${projectId}`} workspaceId={workspaceId} projectId={projectId} onOpenTask={openTaskContext} onOpenDecision={openDecisionContext} onOpenDiscussion={openDiscussionContext} />;
+      case "ai-suggestions":
+        return <AISuggestions key={`${workspaceId}:${projectId}`} workspaceId={workspaceId} projectId={projectId} onOpenTask={openTaskContext} onOpenDecision={openDecisionContext} onOpenDiscussion={openDiscussionContext} />;
       default:
         return <Dashboard onNavigate={navigate} />;
     }
@@ -392,8 +450,9 @@ function App() {
 
   if (checkingSession) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-bg text-sm text-muted">
-        Checking your session...
+      <div className="relative flex min-h-screen items-center justify-center bg-bg text-sm text-muted">
+        <ThemeToggle className="absolute right-4 top-4" />
+        <span>Checking your session...</span>
       </div>
     );
   }
@@ -402,13 +461,30 @@ function App() {
     return <div className="min-h-screen bg-bg text-text">{renderPage()}</div>;
   }
 
+  if (loadingWorkspaces) {
+    return <div className="relative flex min-h-screen items-center justify-center bg-bg text-sm text-muted"><ThemeToggle className="absolute right-4 top-4" />Loading your workspaces...</div>;
+  }
+
+  if (workspaceError && workspaces.length === 0) {
+    return (
+      <main className="relative flex min-h-screen items-center justify-center bg-bg px-5 text-text">
+        <ThemeToggle className="absolute right-4 top-4" />
+        <section className="w-full max-w-lg rounded-2xl border border-line bg-surface p-6">
+          <h1 className="text-lg font-semibold">Workspaces are unavailable</h1>
+          <p role="alert" className="mt-2 text-sm text-red-600 dark:text-red-300">{workspaceError}</p>
+          <button type="button" onClick={() => setWorkspaceLoadAttempt((attempt) => attempt + 1)} className="mt-4 rounded-lg bg-teal-700 px-4 py-2 text-sm font-semibold text-white">Retry</button>
+        </section>
+      </main>
+    );
+  }
+
+  if (workspaces.length === 0) {
+    return <WorkspaceOnboarding user={user} onCreateWorkspace={handleCreateWorkspace} onJoinWorkspace={handleJoinWorkspace} onLogout={handleLogout} />;
+  }
+
   const selectedWorkspace = workspaces.find(
     (item) => getItemId(item) === workspaceId
   );
-  const selectedProject = projects.find(
-    (item) => getItemId(item) === projectId
-  );
-
   return (
     <div className="flex h-screen overflow-hidden bg-bg text-text">
       <Sidebar
@@ -418,7 +494,7 @@ function App() {
       />
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <Header activePage={activePage} />
+        <Header activePage={activePage} workspaceId={workspaceId} projectId={projectId} onNavigate={navigate} onOpenTask={openTaskContext} onOpenDecision={openDecisionContext} onOpenDiscussion={openDiscussionContext} />
 
         <main
           className={`min-h-0 flex-1 overflow-y-auto p-4 sm:p-6 ${sidebarCollapsed ? "lg:px-8" : ""
@@ -433,7 +509,7 @@ function App() {
               <select
                 id="workspace-select"
                 value={workspaceId}
-                onChange={(event) => setWorkspaceId(event.target.value)}
+                onChange={(event) => { setWorkspaceId(event.target.value); setProjectId(""); setProjectError(""); navigate("dashboard"); }}
                 disabled={loadingWorkspaces || workspaces.length === 0}
                 className="max-w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-text outline-none focus:border-teal-600"
               >
@@ -449,11 +525,12 @@ function App() {
 
               <button
                 type="button"
-                onClick={handleCreateWorkspace}
+                onClick={() => setDialogType("createWorkspace")}
                 className="rounded-lg border border-line bg-surface px-3 py-2 text-sm font-medium text-text hover:bg-hover"
               >
                 + Workspace
               </button>
+              <button type="button" onClick={() => setDialogType("join")} className="rounded-lg border border-line bg-surface px-3 py-2 text-sm font-medium text-text hover:bg-hover">Join</button>
 
               <label className="sr-only" htmlFor="project-select">
                 Select project
@@ -462,7 +539,7 @@ function App() {
               <select
                 id="project-select"
                 value={projectId}
-                onChange={(event) => setProjectId(event.target.value)}
+                onChange={(event) => { setProjectId(event.target.value); navigate("dashboard"); }}
                 disabled={!workspaceId || loadingProjects || projects.length === 0}
                 className="max-w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-text outline-none focus:border-teal-600"
               >
@@ -482,12 +559,15 @@ function App() {
 
               <button
                 type="button"
-                onClick={handleCreateProject}
+                onClick={() => setDialogType("createProject")}
                 disabled={!workspaceId}
                 className="rounded-lg bg-teal-700 px-3 py-2 text-sm font-semibold text-white hover:bg-teal-800 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 + Project
               </button>
+              {selectedWorkspace?.members?.some((member) => String(member.user?._id || member.user) === String(user._id || user.id) && member.role === "Admin") && (
+                <button type="button" onClick={() => setDialogType("invite")} className="rounded-lg border border-line bg-surface px-3 py-2 text-sm font-medium text-text hover:bg-hover">Invite</button>
+              )}
             </div>
 
             <div className="flex items-center gap-3">
@@ -507,25 +587,12 @@ function App() {
           {(workspaceError || projectError) && (
             <div
               role="alert"
-              className="mb-4 rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800"
+              className="mb-4 rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300"
             >
               {workspaceError || projectError}
-            </div>
-          )}
-
-          {!loadingWorkspaces && workspaces.length === 0 && (
-            <div className="mb-4 rounded-xl border border-line bg-surface p-5">
-              <h2 className="font-semibold text-text">Create your first workspace</h2>
-              <p className="mt-1 text-sm text-muted">
-                A workspace keeps your team's projects and discussions together.
-              </p>
-              <button
-                type="button"
-                onClick={handleCreateWorkspace}
-                className="mt-3 rounded-lg bg-teal-700 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-800"
-              >
-                Create workspace
-              </button>
+              {projectError && (
+                <button type="button" onClick={() => setProjectLoadAttempt((attempt) => attempt + 1)} className="ml-3 font-semibold underline">Retry project load</button>
+              )}
             </div>
           )}
 
@@ -539,7 +606,7 @@ function App() {
               </p>
               <button
                 type="button"
-                onClick={handleCreateProject}
+                onClick={() => setDialogType("createProject")}
                 className="mt-3 rounded-lg bg-teal-700 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-800"
               >
                 Create project
@@ -550,6 +617,7 @@ function App() {
           {renderPage()}
         </main>
       </div>
+      {dialogType && <WorkspaceDialog type={dialogType} workspace={selectedWorkspace} onClose={() => setDialogType("")} onCreateWorkspace={handleCreateWorkspace} onCreateProject={handleCreateProject} onJoinWorkspace={handleJoinWorkspace} onInviteMember={handleInviteMember} />}
     </div>
   );
 }
