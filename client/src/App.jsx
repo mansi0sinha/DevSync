@@ -575,7 +575,7 @@ function App() {
                     className="w-full rounded-lg border border-line bg-bg px-3 py-2.5 text-sm text-text outline-none placeholder:text-muted focus:border-teal-600"
                   />
 
-                  {!workspaceFormOpen && !projectFormOpen && (workspaceError || projectError) && (
+                  {(workspaceFormOpen ? workspaceError : projectError) && (
                     <p role="alert" className="mt-2 text-sm text-red-500">
                       {workspaceFormOpen ? workspaceError : projectError}
                     </p>
@@ -607,7 +607,7 @@ function App() {
             </div>
           )}
 
-          {(workspaceError || projectError) && (
+          {!workspaceFormOpen && !projectFormOpen && (workspaceError || projectError) && (
             <div
               role="alert"
               className="mb-4 rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800"
@@ -624,7 +624,7 @@ function App() {
               </p>
               <button
                 type="button"
-                onClick={handleCreateWorkspace}
+                onClick={() => { setWorkspaceError(""); setWorkspaceFormOpen(true); }}
                 className="mt-3 rounded-lg bg-teal-700 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-800"
               >
                 Create workspace
@@ -642,7 +642,7 @@ function App() {
               </p>
               <button
                 type="button"
-                onClick={handleCreateProject}
+                onClick={() => { setProjectError(""); setProjectFormOpen(true); }}
                 className="mt-3 rounded-lg bg-teal-700 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-800"
               >
                 Create project
