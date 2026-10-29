@@ -1,9 +1,10 @@
 import { io } from "socket.io-client";
 import { API_ORIGIN, getToken } from "./api";
+import { createRealtimeSubscriptions } from "./realtimeSubscriptions.js";
 
 let socket = null;
 let status = "disconnected";
-const listeners = new Map();
+const subscriptions = createRealtimeSubscriptions();
 
 function publishStatus(nextStatus) {
   status = nextStatus;
@@ -13,23 +14,11 @@ function publishStatus(nextStatus) {
 }
 
 function publish(eventName, payload) {
-  (listeners.get(eventName) || []).forEach((handler) => handler(payload));
-}
-
-function attachListeners(activeSocket) {
-  for (const [eventName, handlers] of listeners.entries()) {
-    handlers.forEach((handler) => activeSocket.on(eventName, handler));
-  }
+  subscriptions.publish(eventName, payload);
 }
 
 export function subscribeRealtime(eventName, handler) {
-  if (!listeners.has(eventName)) listeners.set(eventName, new Set());
-  listeners.get(eventName).add(handler);
-  socket?.on(eventName, handler);
-  return () => {
-    listeners.get(eventName)?.delete(handler);
-    socket?.off(eventName, handler);
-  };
+  return subscriptions.subscribe(eventName, handler);
 }
 
 export function getRealtimeStatus() {
@@ -58,7 +47,7 @@ export function connectRealtime({ workspaceId, projectId }) {
     timeout: 10_000,
   });
   socket = activeSocket;
-  attachListeners(activeSocket);
+  subscriptions.attach(activeSocket);
   let joinedBefore = false;
   const scope = { workspaceId: String(workspaceId), projectId: String(projectId) };
 
@@ -109,6 +98,7 @@ export function disconnectRealtime() {
   if (socket) {
     const oldSocket = socket;
     socket = null;
+    subscriptions.detach(oldSocket);
     oldSocket.removeAllListeners();
     oldSocket.disconnect();
   }

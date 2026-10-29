@@ -1,5 +1,5 @@
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   MessageSquare,
   Search,
@@ -25,18 +25,11 @@ import {
   getToken,
 } from "../services/api";
 import { subscribeRealtime } from "../services/realtime";
+import { uploadAttachmentsAndSend } from "../services/discussionMessageUpload";
 
 const MAX_FILES = 5;
-const MAX_FILE_SIZE = 5 * 1024 * 1024;
-
-const ALLOWED_EXTENSIONS = [
-  "jpg",
-  "jpeg",
-  "png",
-  "webp",
-  "pdf",
-  "txt",
-];
+const DEFAULT_MAX_FILE_SIZE = 5 * 1024 * 1024;
+const DEFAULT_UPLOAD_FORMATS = [".jpg", ".jpeg", ".png", ".webp", ".pdf", ".txt"];
 
 function formatFileSize(bytes = 0) {
   if (bytes < 1024) return `${bytes} B`;
@@ -44,9 +37,9 @@ function formatFileSize(bytes = 0) {
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
-function isAllowedFile(file) {
-  const extension = file.name.split(".").pop()?.toLowerCase();
-  return ALLOWED_EXTENSIONS.includes(extension);
+function isAllowedFile(file, formats) {
+  const extension = `.${file.name.split(".").pop()?.toLowerCase()}`;
+  return formats.includes(extension);
 }
 
 function formatMessageTime(dateValue) {
@@ -119,19 +112,8 @@ function Avatar({ initials, small = false }) {
 }
 
 function FilePreview({ file, onRemove, disabled }) {
-  const [previewURL, setPreviewURL] = useState("");
-
-  useEffect(() => {
-    if (!file.type.startsWith("image/")) {
-      setPreviewURL("");
-      return undefined;
-    }
-
-    const url = URL.createObjectURL(file);
-    setPreviewURL(url);
-
-    return () => URL.revokeObjectURL(url);
-  }, [file]);
+  const previewURL = useMemo(() => file.type.startsWith("image/") ? URL.createObjectURL(file) : "", [file]);
+  useEffect(() => () => { if (previewURL) URL.revokeObjectURL(previewURL); }, [previewURL]);
 
   const isImage = file.type.startsWith("image/");
 
@@ -577,6 +559,8 @@ export default function Discussion({ workspaceId, projectId, workspace, project,
   const [loading, setLoading] = useState(true);
   const [pageError, setPageError] = useState("");
   const [sendingMessage, setSendingMessage] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(null);
+  const [uploadConfig, setUploadConfig] = useState({ maxFileBytes: DEFAULT_MAX_FILE_SIZE, maxFiles: MAX_FILES, formats: DEFAULT_UPLOAD_FORMATS });
   const [focusedMessageId, setFocusedMessageId] = useState("");
   const [recordedDecisions, setRecordedDecisions] = useState({});
   const [recordingMessage, setRecordingMessage] = useState(null);
@@ -586,6 +570,17 @@ export default function Discussion({ workspaceId, projectId, workspace, project,
   const threadsRef = useRef(threads);
 
   const fileInputRef = useRef(null);
+
+  useEffect(() => {
+    let active = true;
+    uploadAPI.getConfig().then((config) => {
+      if (active && Number.isSafeInteger(config.maxFileBytes) && config.maxFileBytes > 0) {
+        const formats = Array.isArray(config.formats) && config.formats.length && config.formats.every((item) => typeof item === "string" && /^\.[a-z0-9]+$/.test(item)) ? config.formats : DEFAULT_UPLOAD_FORMATS;
+        setUploadConfig({ maxFileBytes: config.maxFileBytes, maxFiles: Number.isSafeInteger(config.maxFiles) ? config.maxFiles : MAX_FILES, formats });
+      }
+    }).catch(() => {});
+    return () => { active = false; };
+  }, []);
 
   useEffect(() => {
     threadsRef.current = threads;
@@ -780,13 +775,13 @@ export default function Discussion({ workspaceId, projectId, workspace, project,
     let error = "";
 
     for (const file of incomingFiles) {
-      if (!isAllowedFile(file)) {
-        error = `${file.name}: only JPG, PNG, WebP, PDF, and TXT files are allowed.`;
+      if (!isAllowedFile(file, uploadConfig.formats)) {
+        error = `${file.name}: supported formats are ${uploadConfig.formats.join(", ")}.`;
         break;
       }
 
-      if (file.size > MAX_FILE_SIZE) {
-        error = `${file.name}: each file must be 5 MB or smaller.`;
+      if (file.size > uploadConfig.maxFileBytes) {
+        error = `${file.name}: each file must be ${formatFileSize(uploadConfig.maxFileBytes)} or smaller.`;
         break;
       }
 
@@ -799,8 +794,8 @@ export default function Discussion({ workspaceId, projectId, workspace, project,
 
       if (alreadySelected) continue;
 
-      if (nextFiles.length >= MAX_FILES) {
-        error = "You can attach a maximum of 5 files per message.";
+      if (nextFiles.length >= uploadConfig.maxFiles) {
+        error = `You can attach a maximum of ${uploadConfig.maxFiles} files per message.`;
         break;
       }
 
@@ -839,16 +834,18 @@ export default function Discussion({ workspaceId, projectId, workspace, project,
       setSendingMessage(true);
       setPageError("");
 
-      let attachments = [];
-
       if (selectedFiles.length > 0) {
-        const uploadResult = await uploadAPI.uploadFiles(selectedFiles, workspaceId, projectId);
-        attachments = (uploadResult.data || []).map(({ uploadId }) => ({ uploadId }));
+        setUploadProgress(0);
       }
 
-      const result = await discussionAPI.addMessage(activeThread.id, {
+      const result = await uploadAttachmentsAndSend({
+        files: selectedFiles,
+        workspaceId,
+        projectId,
         text,
-        attachments,
+        uploadFiles: uploadAPI.uploadFiles,
+        onProgress: setUploadProgress,
+        addMessage: (payload) => discussionAPI.addMessage(activeThread.id, payload),
       });
 
       const updatedThread = normalizeThread(result.data);
@@ -861,10 +858,12 @@ export default function Discussion({ workspaceId, projectId, workspace, project,
 
       setMessage("");
       setSelectedFiles([]);
+      setPageNotice("Message sent successfully.");
     } catch (error) {
       setPageError(error.message || "Failed to send message or upload files.");
     } finally {
       setSendingMessage(false);
+      setUploadProgress(null);
     }
   }
 
@@ -935,7 +934,7 @@ export default function Discussion({ workspaceId, projectId, workspace, project,
   if (pageError && threads.length === 0) {
     return (
       <div className="p-6" role="alert">
-        <p className="text-sm text-red-500">{pageError}</p>
+        <p className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-700 dark:text-red-300">{pageError}</p>
         <Button className="mt-3" onClick={() => window.location.reload()}>
           Retry
         </Button>
@@ -948,7 +947,7 @@ export default function Discussion({ workspaceId, projectId, workspace, project,
       {pageError && (
         <div
           role="alert"
-          className="flex items-start justify-between gap-3 rounded-lg border border-red-500/20 bg-red-500/5 px-4 py-3 text-sm text-red-500"
+          className="flex items-start justify-between gap-3 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-700 dark:text-red-300"
         >
           <span>{pageError}</span>
           <button
@@ -985,7 +984,7 @@ export default function Discussion({ workspaceId, projectId, workspace, project,
         </Button>
       </div>
 
-      <div className="grid min-h-[680px] flex-1 grid-cols-1 grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-xl border border-line bg-surface lg:min-h-[560px] lg:grid-cols-[280px_minmax(0,1fr)] lg:grid-rows-1">
+      <div className="grid min-h-170 flex-1 grid-cols-1 grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-xl border border-line bg-surface lg:min-h-140 lg:grid-cols-[280px_minmax(0,1fr)] lg:grid-rows-1">
         <aside className="flex max-h-64 min-h-0 flex-col border-b border-line bg-side lg:max-h-none lg:border-b-0 lg:border-r">
           <div className="border-b border-line p-4">
             <div className="relative">
@@ -1093,7 +1092,7 @@ export default function Discussion({ workspaceId, projectId, workspace, project,
           </div>
         </aside>
 
-        <section className="flex min-h-[460px] min-w-0 flex-col lg:min-h-0">
+        <section className="flex min-h-115 min-w-0 flex-col lg:min-h-0">
           {activeThread ? (
             <>
               <div className="flex flex-col justify-between gap-3 border-b border-line p-4 sm:flex-row sm:items-start sm:p-5">
@@ -1295,26 +1294,28 @@ export default function Discussion({ workspaceId, projectId, workspace, project,
                         ref={fileInputRef}
                         type="file"
                         multiple
-                        accept=".jpg,.jpeg,.png,.webp,.pdf,.txt,image/jpeg,image/png,image/webp,application/pdf,text/plain"
+                        accept={uploadConfig.formats.join(",")}
                         className="hidden"
                         onChange={handleFileSelection}
                       />
 
                       <button
                         type="button"
-                        disabled={sendingMessage || selectedFiles.length >= MAX_FILES}
+                        disabled={sendingMessage || selectedFiles.length >= uploadConfig.maxFiles}
                         onClick={() => fileInputRef.current?.click()}
                         aria-label="Attach files"
-                        title="Attach up to 5 files (5 MB each)"
+                        title={`Attach up to ${uploadConfig.maxFiles} files (${formatFileSize(uploadConfig.maxFileBytes)} each): ${uploadConfig.formats.join(", ")}`}
                         className="rounded-md p-1.5 text-muted hover:bg-hover hover:text-text disabled:cursor-not-allowed disabled:opacity-40"
                       >
                         <Paperclip size={17} />
                       </button>
 
                       <span className="text-[10px] text-muted sm:text-[11px]">
-                        {selectedFiles.length}/{MAX_FILES} files · 5 MB max each
+                        {selectedFiles.length}/{uploadConfig.maxFiles} files · {formatFileSize(uploadConfig.maxFileBytes)} max each · {uploadConfig.formats.join(", ")}
                       </span>
                     </div>
+
+                    {sendingMessage && uploadProgress !== null && <div className="w-full basis-full" role="status" aria-live="polite"><div className="h-1.5 overflow-hidden rounded-full bg-hover"><div className="h-full rounded-full bg-acc transition-[width] duration-150" style={{ width: `${uploadProgress}%` }} /></div><p className="mt-1 text-right text-[11px] text-muted">Uploading attachments · {uploadProgress}%</p></div>}
 
                     <Button
                       type="submit"
@@ -1325,7 +1326,7 @@ export default function Discussion({ workspaceId, projectId, workspace, project,
                         sendingMessage
                       }
                     >
-                      {sendingMessage ? "Uploading..." : "Send"}
+                      {sendingMessage ? (selectedFiles.length ? "Uploading..." : "Sending...") : "Send"}
                       <Send size={14} />
                     </Button>
                   </div>

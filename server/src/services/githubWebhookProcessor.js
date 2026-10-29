@@ -9,7 +9,12 @@ const { emitProjectEvent } = require("../realtime");
 const MAX_ATTEMPTS = 5;
 const PROCESSING_TIMEOUT_MS = 2 * 60 * 1000;
 const MAX_BACKOFF_MS = 5 * 60 * 1000;
-const SUPPORTED_ACTIONS = new Set(["opened", "reopened", "edited", "closed"]);
+const SUPPORTED_ACTIONS = new Set(["opened", "reopened", "edited", "closed", "review_requested"]);
+const REVIEW_ACTIONS = new Set(["approved", "changes_requested", "commented"]);
+
+function meetsTaskCompletionPolicy(task) {
+  return task?.status === "in-review" && (task.acceptanceCriteria || []).every((criterion) => criterion.completed === true);
+}
 
 function verifySignature(rawBody, signature, secret) {
   if (!Buffer.isBuffer(rawBody) || typeof signature !== "string" || !/^sha256=[a-f0-9]{64}$/i.test(signature) || !secret) return false;
@@ -21,7 +26,11 @@ function verifySignature(rawBody, signature, secret) {
 function normalizePayload(eventName, payload) {
   const repo = normalizeRepositoryFullName(payload?.repository?.full_name);
   const pr = payload?.pull_request;
-  if (eventName !== "pull_request" || !SUPPORTED_ACTIONS.has(payload?.action)) return { ignored: true };
+  let action = payload?.action;
+  if (eventName === "pull_request_review") {
+    if (action !== "submitted" || !REVIEW_ACTIONS.has(payload?.review?.state)) return { ignored: true };
+    action = `review_${payload.review.state}`;
+  } else if (eventName !== "pull_request" || !SUPPORTED_ACTIONS.has(action)) return { ignored: true };
   if (!repo || !pr || !Number.isSafeInteger(pr.number) || pr.number < 1 ||
       typeof pr.title !== "string" || pr.title.length > 256 ||
       !["open", "closed"].includes(pr.state) || typeof pr.merged !== "boolean" || typeof pr.draft !== "boolean" ||
@@ -32,7 +41,7 @@ function normalizePayload(eventName, payload) {
     owner: repo.owner,
     repository: repo.repository,
     number: pr.number,
-    action: payload.action,
+    action,
     state,
     title: pr.title,
     draft: pr.draft,
@@ -49,7 +58,7 @@ async function claimDelivery(deliveryId) {
       { status: { $in: ["pending", "failed"] }, nextAttemptAt: { $lte: now }, attempts: { $lt: MAX_ATTEMPTS } },
       { status: "processing", processingAt: { $lte: staleBefore }, attempts: { $lt: MAX_ATTEMPTS } },
     ],
-  }, { $set: { status: "processing", processingAt: now }, $inc: { attempts: 1 } }, { new: true });
+  }, { $set: { status: "processing", processingAt: now }, $inc: { attempts: 1 } }, { returnDocument: "after" });
 }
 
 async function processClaimedDelivery(delivery, io) {
@@ -77,7 +86,8 @@ async function processClaimedDelivery(delivery, io) {
   const prLink = task.pullRequests.find((entry) => entry.repositoryKey === data.repositoryKey && entry.number === data.number);
   if (!prLink) throw new Error("link_changed");
 
-  if (String(prLink.lastDeliveryId || "") !== String(delivery.deliveryId)) {
+  const lifecycleEvent = !data.action.startsWith("review_") && data.action !== "review_requested";
+  if (lifecycleEvent && String(prLink.lastDeliveryId || "") !== String(delivery.deliveryId)) {
     const previousWebhookTime = prLink.lastWebhookAt ? new Date(prLink.lastWebhookAt).getTime() : null;
     const incomingWebhookTime = new Date(data.pullRequestUpdatedAt).getTime();
     const statePriority = { open: 1, closed: 2, merged: 3 };
@@ -114,8 +124,38 @@ async function processClaimedDelivery(delivery, io) {
     }
   }
 
-  const action = data.state === "merged" ? "github.pr_merged" : `github.pr_${data.state === "closed" ? "closed" : data.action}`;
-  const stateLabel = data.state === "merged" ? "merged" : data.state === "closed" ? "closed" : data.action;
+  if (data.action === "review_changes_requested") {
+    await Task.updateOne({ _id: task._id, workspace: task.workspace, project: task.project, status: "in-review" }, { $set: { status: "in-progress" } });
+  }
+
+  // A merged PR completes a task only after it has entered review and every
+  // explicitly listed acceptance criterion has been checked.
+  if (data.state === "merged") {
+    const completionCandidate = await Task.findById(task._id).select("status acceptanceCriteria").lean();
+    const eligibleForCompletion = meetsTaskCompletionPolicy(completionCandidate);
+    const completion = eligibleForCompletion && await Task.findOneAndUpdate({
+      _id: task._id,
+      workspace: task.workspace,
+      project: task.project,
+      status: "in-review",
+      "pullRequests.repositoryKey": data.repositoryKey,
+      "pullRequests.number": data.number,
+      $nor: [{ acceptanceCriteria: { $elemMatch: { completed: false } } }],
+    }, { $set: { status: "done", completedAt: new Date(data.pullRequestUpdatedAt), completionMethod: "github", completionNote: `Merged PR #${data.number}` } }, { returnDocument: "after" });
+    if (completion) {
+      const saved = await recordProjectEvent({
+        io, systemEvent: true, workspaceId: task.workspace, projectId: task.project,
+        action: "task.completed", summary: `Completed task from merged PR #${data.number}`,
+        entityType: "task", entityId: task._id,
+        eventKey: `github-task-completed:${delivery.deliveryId}`,
+        notifications: task.assignee ? [{ recipient: task.assignee, type: "task.completed", title: "Task completed", message: `Merged PR #${data.number}`, eventKey: delivery.deliveryId }] : [],
+      });
+      if (!saved) throw new Error("completion_event_failed");
+    }
+  }
+
+  const action = data.state === "merged" ? "github.pr_merged" : data.action.startsWith("review_") ? `github.${data.action}` : `github.pr_${data.state === "closed" ? "closed" : data.action}`;
+  const stateLabel = data.state === "merged" ? "merged" : data.state === "closed" ? "closed" : data.action.replace(/^review_/, "").replaceAll("_", " ");
   const eventRecorded = await recordProjectEvent({
     io,
     systemEvent: true,
@@ -218,4 +258,4 @@ function startGitHubWebhookWorker(io) {
   timer.unref?.();
 }
 
-module.exports = { acceptDelivery, verifySignature, startGitHubWebhookWorker };
+module.exports = { acceptDelivery, verifySignature, normalizePayload, meetsTaskCompletionPolicy, startGitHubWebhookWorker };

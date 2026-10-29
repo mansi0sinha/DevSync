@@ -6,7 +6,6 @@ import {
   Columns3,
   GitMerge,
   Activity,
-  Sparkles,
   Settings,
   ChevronsUpDown,
   Plus,
@@ -21,15 +20,31 @@ const navigation = [
   { name: "Board", icon: Columns3, id: "board" },
   { name: "Decisions", icon: GitMerge, id: "decisions" },
   { name: "Activity", icon: Activity, id: "activity" },
-  { name: "AI Suggestions", icon: Sparkles, id: "ai-suggestions" },
 ];
 
 export default function Sidebar({
   activePage = "dashboard",
   onNavigate,
   onCollapseChange,
+  workspace,
+  workspaces = [],
+  workspaceId,
+  onWorkspaceChange,
+  projects = [],
+  projectId,
+  onProjectChange,
+  onCreateProject,
+  onCreateWorkspace,
+  user,
+  mobileOpen = false,
+  onMobileClose,
 }) {
   const [isCollapsed, setIsCollapsed] = useState(false);
+
+  function navigateAndClose(page) {
+    onNavigate?.(page);
+    onMobileClose?.();
+  }
 
   const toggleSidebar = () => {
     setIsCollapsed((current) => {
@@ -39,11 +54,12 @@ export default function Sidebar({
     });
   };
 
-  return (
+  return <>
+    {mobileOpen && <button type="button" aria-label="Close navigation menu" onClick={onMobileClose} className="fixed inset-0 z-40 cursor-default bg-black/40 md:hidden" />}
     <aside
-      className={`m-3 flex h-[calc(100vh-24px)] shrink-0 flex-col overflow-hidden rounded-xl border border-line bg-side transition-[width] duration-200 ${
-        isCollapsed ? "w-19" : "w-64"
-      }`}
+      id="primary-sidebar"
+      aria-label="Primary navigation"
+      className={`fixed left-3 top-3 z-50 flex h-[calc(100dvh-1.5rem)] w-[min(16rem,calc(100vw-1.5rem))] shrink-0 flex-col overflow-hidden rounded-xl border border-line bg-side md:relative md:left-auto md:top-auto md:z-auto md:m-3 md:h-[calc(100vh-24px)] md:w-64 md:transition-[width] md:duration-200 ${mobileOpen ? "" : "hidden md:flex"} ${isCollapsed ? "md:w-19" : ""}`}
     >
       {/* Brand and collapse button */}
       <div
@@ -93,38 +109,17 @@ export default function Sidebar({
 
       {/* Workspace selector */}
       <div className={`shrink-0 ${isCollapsed ? "p-2" : "p-3"}`}>
-        <button
-          type="button"
-          title={isCollapsed ? "My Workspace" : undefined}
-          className={`flex w-full items-center rounded-lg border border-line bg-surface text-left transition-colors hover:bg-hover ${
-            isCollapsed
-              ? "justify-center p-2"
-              : "gap-3 p-2.5"
-          }`}
+        <select
+          aria-label="Select workspace"
+          value={workspaceId || ""}
+          onChange={(event) => { onWorkspaceChange?.(event.target.value); onMobileClose?.(); }}
+          title={isCollapsed ? workspace?.name || "Workspace" : undefined}
+          className="w-full min-w-0 rounded-lg border border-line bg-surface px-2.5 py-2.5 text-sm font-semibold text-text outline-none focus:border-acc"
         >
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-line bg-hover text-sm font-semibold text-text">
-            W
-          </div>
-
-          {!isCollapsed && (
-            <>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-semibold text-text">
-                  My Workspace
-                </p>
-                <p className="mt-0.5 text-xs text-muted">
-                  Free workspace
-                </p>
-              </div>
-
-              <ChevronsUpDown
-                size={15}
-                strokeWidth={1.8}
-                className="shrink-0 text-muted"
-              />
-            </>
-          )}
-        </button>
+          <option value="" disabled>{workspace?.name || "Select workspace"}</option>
+          {workspaces.map((item) => <option key={item._id || item.id} value={item._id || item.id}>{item.name}</option>)}
+        </select>
+        {!isCollapsed && <button type="button" onClick={onCreateWorkspace} className="mt-2 w-full rounded-lg px-2 py-1 text-left text-xs font-medium text-muted hover:bg-hover hover:text-text">+ Add workspace</button>}
       </div>
 
       {/* Scrollable navigation */}
@@ -148,7 +143,7 @@ export default function Sidebar({
               <button
                 key={item.id}
                 type="button"
-                onClick={() => onNavigate?.(item.id)}
+                onClick={() => navigateAndClose(item.id)}
                 aria-current={isActive ? "page" : undefined}
                 title={isCollapsed ? item.name : undefined}
                 className={`group flex min-h-10 w-full items-center rounded-lg py-2 text-sm transition-colors ${
@@ -202,26 +197,35 @@ export default function Sidebar({
                   type="button"
                   aria-label="Add project"
                   title="Add project"
+                  onClick={() => { onMobileClose?.(); onCreateProject?.(); }}
                   className="rounded-md p-1 text-muted transition-colors hover:bg-hover hover:text-text"
                 >
                   <Plus size={16} strokeWidth={1.8} />
                 </button>
               </div>
 
-              <div className="rounded-lg border border-dashed border-faint px-3 py-4">
+              {projects.length ? <nav aria-label="Projects" className="space-y-1">
+                {projects.map((project) => {
+                  const id = project._id || project.id;
+                  const selected = String(projectId) === String(id);
+                  return <button key={id} type="button" onClick={() => { onProjectChange?.(id); onMobileClose?.(); }} aria-current={selected ? "page" : undefined} className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm ${selected ? "bg-hover font-semibold text-text" : "text-muted hover:bg-hover hover:text-text"}`}><span className="h-2 w-2 shrink-0 rounded-sm bg-acc"/><span className="truncate">{project.name}</span></button>;
+                })}
+              </nav> : <div className="rounded-lg border border-dashed border-faint px-3 py-4">
                 <p className="text-sm font-medium text-text">
                   No projects yet
                 </p>
                 <p className="mt-1 text-xs leading-5 text-muted">
                   Create a project to organize your team's tasks and decisions.
                 </p>
-              </div>
+                <button type="button" onClick={() => { onMobileClose?.(); onCreateProject?.(); }} className="mt-3 text-xs font-semibold text-acc hover:underline">Create project</button>
+              </div>}
             </>
           ) : (
             <button
               type="button"
-              aria-label="Add project"
+              aria-label={projects.length ? "Projects" : "Create project"}
               title="Add project"
+              onClick={projects.length ? () => navigateAndClose("dashboard") : () => { onMobileClose?.(); onCreateProject?.(); }}
               className="flex h-10 w-full items-center justify-center rounded-lg text-muted transition-colors hover:bg-hover hover:text-text"
             >
               <Plus size={18} strokeWidth={1.8} />
@@ -239,7 +243,7 @@ export default function Sidebar({
         {/* Settings */}
         <button
           type="button"
-          onClick={() => onNavigate?.("settings")}
+          onClick={() => navigateAndClose("settings")}
           aria-current={activePage === "settings" ? "page" : undefined}
           title={isCollapsed ? "Settings" : undefined}
           className={`flex min-h-10 w-full items-center rounded-lg py-2 text-sm transition-colors ${
@@ -270,20 +274,20 @@ export default function Sidebar({
               ? "justify-center p-1.5"
               : "gap-3 p-2.5"
           }`}
-          title={isCollapsed ? "Your Account — Developer" : undefined}
+          title={isCollapsed ? user?.name || user?.email || "Your account" : undefined}
         >
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-line bg-hover font-mono text-xs font-medium text-text">
-            U
+            {(user?.name || user?.email || "U").slice(0, 1).toUpperCase()}
           </div>
 
           {!isCollapsed && (
             <>
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-semibold text-text">
-                  Your Account
+                  {user?.name || user?.email || "Your account"}
                 </p>
                 <p className="mt-0.5 text-xs text-muted">
-                  Developer
+                  {user?.email || "Member"}
                 </p>
               </div>
 
@@ -297,5 +301,5 @@ export default function Sidebar({
         </div>
       </div>
     </aside>
-  );
+  </>;
 }

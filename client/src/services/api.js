@@ -1,8 +1,9 @@
 import { resolveApiConfig } from "./apiConfig.js";
+import { normalizeNetworkError, normalizeResponseError, normalizeUnexpectedResponse } from "./apiErrors.js";
 
 const { apiBaseUrl: API_BASE_URL, apiOrigin: API_ORIGIN } = resolveApiConfig({
-  configuredUrl: import.meta.env.VITE_API_BASE_URL,
-  isProduction: import.meta.env.PROD,
+  configuredUrl: import.meta.env?.VITE_API_BASE_URL,
+  isProduction: import.meta.env?.PROD,
 });
 export { API_ORIGIN };
 const TOKEN_KEY = "devsync_token";
@@ -34,7 +35,7 @@ export const clearSession = () => {
 };
 
 // Central API request handler.
-async function request(endpoint, options = {}) {
+export async function request(endpoint, options = {}) {
   const headers = { ...options.headers };
   const token = getToken();
 
@@ -46,17 +47,19 @@ async function request(endpoint, options = {}) {
     headers.Authorization = `Bearer ${token}`;
   }
 
-  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-    ...options,
-    headers,
-  });
+  let response;
+  try {
+    response = await fetch(`${API_BASE_URL}${endpoint}`, { ...options, headers });
+  } catch (error) {
+    throw normalizeNetworkError(error);
+  }
 
-  let result = {};
-
+  let result;
+  let invalidJson = false;
   try {
     result = await response.json();
   } catch {
-    result = {};
+    invalidJson = true;
   }
 
   if (!response.ok) {
@@ -65,8 +68,10 @@ async function request(endpoint, options = {}) {
       window.dispatchEvent(new Event("devsync:session-expired"));
     }
 
-    throw new Error(result.message || "Something went wrong");
+    throw normalizeResponseError(response.status, result, { invalidJson });
   }
+
+  if (invalidJson || !result || typeof result !== "object") throw normalizeUnexpectedResponse(response.status);
 
   return result;
 }
@@ -87,6 +92,8 @@ export const authAPI = {
 
   me: () => request("/auth/me"),
 
+  updateProfile: (profile) => request("/auth/me", { method: "PATCH", body: JSON.stringify(profile) }),
+
   logout: () => clearSession(),
 };
 
@@ -96,6 +103,8 @@ export const workspaceAPI = {
 
   getById: (workspaceId) =>
     request(`/workspaces/${workspaceId}`),
+
+  getMemberManagement: (workspaceId) => request(`/workspaces/${workspaceId}/member-management`),
 
   create: (workspace) =>
     request("/workspaces", {
@@ -108,6 +117,8 @@ export const workspaceAPI = {
       method: "POST",
       body: JSON.stringify({ email }),
     }),
+
+  revokeInvitation: (workspaceId, invitationId) => request(`/workspaces/${workspaceId}/invitations/${invitationId}/revoke`, { method: "POST" }),
 
   acceptInvitation: (token) =>
     request("/workspaces/invitations/accept", {
@@ -126,6 +137,7 @@ export const workspaceAPI = {
       method: "PATCH",
       body: JSON.stringify({ role }),
     }),
+  delete: (workspaceId, confirmName) => request(`/workspaces/${workspaceId}`, { method: "DELETE", body: JSON.stringify({ confirmName }) }),
 };
 
 // Projects inside a workspace
@@ -138,6 +150,7 @@ export const projectAPI = {
       method: "POST",
       body: JSON.stringify(project),
     }),
+  delete: (workspaceId, projectId, confirmName) => request(`/workspaces/${workspaceId}/projects/${projectId}`, { method: "DELETE", body: JSON.stringify({ confirmName }) }),
 };
 
 // Existing task API
@@ -193,6 +206,10 @@ export const taskAPI = {
   removePullRequest: (id, pullRequestId, workspaceId, projectId) =>
     request(`/tasks/${id}/github-prs/${pullRequestId}?${new URLSearchParams({ workspaceId, projectId })}`, {
       method: "DELETE",
+    }),
+  complete: (id, completionNote, workspaceId, projectId) =>
+    request(`/tasks/${id}/complete?${new URLSearchParams({ workspaceId, projectId })}`, {
+      method: "POST", body: JSON.stringify({ completionNote }),
     }),
 };
 
@@ -277,13 +294,13 @@ export const decisionAPI = {
 };
 
 export const notificationAPI = {
-  getAll: (workspaceId, projectId, options = {}) => {
-    const params = new URLSearchParams({ workspaceId, projectId, limit: String(options.limit || 30) });
+  getAll: (options = {}) => {
+    const params = new URLSearchParams({ limit: String(options.limit || 30) });
     if (options.before) params.set("before", options.before);
     return request(`/notifications?${params}`);
   },
-  markRead: (id, workspaceId, projectId) => request(`/notifications/${id}/read?${new URLSearchParams({ workspaceId, projectId })}`, { method: "PATCH" }),
-  markAllRead: (workspaceId, projectId) => request(`/notifications/read-all?${new URLSearchParams({ workspaceId, projectId })}`, { method: "PATCH" }),
+  markRead: (id) => request(`/notifications/${id}/read`, { method: "PATCH" }),
+  markAllRead: () => request("/notifications/read-all", { method: "PATCH" }),
 };
 
 export const activityAPI = {
@@ -302,18 +319,11 @@ export const searchAPI = {
   },
 };
 
-export const aiSuggestionAPI = {
-  getAll: (workspaceId, projectId) => request(`/ai-suggestions?${new URLSearchParams({ workspaceId, projectId })}`),
-  create: (payload) => request("/ai-suggestions", { method: "POST", body: JSON.stringify(payload) }),
-  update: (id, workspaceId, projectId, payload) => request(`/ai-suggestions/${id}?${new URLSearchParams({ workspaceId, projectId })}`, { method: "PATCH", body: JSON.stringify(payload) }),
-  approve: (id, workspaceId, projectId, payload) => request(`/ai-suggestions/${id}/approve?${new URLSearchParams({ workspaceId, projectId })}`, { method: "POST", body: JSON.stringify(payload) }),
-  reject: (id, workspaceId, projectId) => request(`/ai-suggestions/${id}/reject?${new URLSearchParams({ workspaceId, projectId })}`, { method: "POST" }),
-  expire: (id, workspaceId, projectId) => request(`/ai-suggestions/${id}/expire?${new URLSearchParams({ workspaceId, projectId })}`, { method: "POST" }),
-};
 
 // Existing file upload API
 export const uploadAPI = {
-  uploadFiles: (files, workspaceId, projectId) => {
+  getConfig: () => request("/uploads/config"),
+  uploadFiles: (files, workspaceId, projectId, onProgress) => {
     const formData = new FormData();
 
     Array.from(files).forEach((file) => {
@@ -321,9 +331,30 @@ export const uploadAPI = {
     });
 
     const scope = new URLSearchParams({ workspaceId, projectId });
-    return request(`/uploads?${scope}`, {
-      method: "POST",
-      body: formData,
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", `${API_BASE_URL}/uploads?${scope}`);
+      const token = getToken();
+      if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable) onProgress?.(Math.round((event.loaded / event.total) * 100));
+      };
+      xhr.onerror = () => reject(normalizeNetworkError(new TypeError("Network request failed")));
+      xhr.ontimeout = () => reject(normalizeNetworkError(new TypeError("Upload timed out")));
+      xhr.onload = () => {
+        let payload;
+        let invalidJson = false;
+        try { payload = JSON.parse(xhr.responseText); } catch { invalidJson = true; }
+        if (xhr.status === 401 && token) {
+          clearSession();
+          window.dispatchEvent(new Event("devsync:session-expired"));
+        }
+        if (xhr.status < 200 || xhr.status >= 300) return reject(normalizeResponseError(xhr.status, payload, { invalidJson }));
+        if (invalidJson || !payload || typeof payload !== "object" || payload.success !== true || !Array.isArray(payload.data) || payload.data.length !== files.length || payload.data.some((item) => typeof item?.uploadId !== "string" || !item.uploadId)) return reject(normalizeUnexpectedResponse(xhr.status));
+        resolve(payload);
+      };
+      xhr.timeout = 120_000;
+      xhr.send(formData);
     });
   },
 };

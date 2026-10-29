@@ -34,19 +34,18 @@ async function recordProjectEvent({ io, actorId = null, systemEvent = false, wor
           workspace: workspaceId, project: projectId, entityType, entityId,
           eventKey: notificationEventKey,
         });
-        io?.to(notificationRoom(recipientId)).emit("notification:new", { notification: {
-          _id: String(notification._id), type: notification.type, title: notification.title, message: notification.message,
-          workspace: String(notification.workspace), project: String(notification.project), entityType: notification.entityType,
-          entityId: String(notification.entityId), readAt: null, createdAt: notification.createdAt,
-        } });
+        // Send only a wake-up identifier over sockets. The authenticated list
+        // route rechecks current membership and resource existence before
+        // returning any notification content.
+        io?.to(notificationRoom(recipientId)).emit("notification:new", { notificationId: String(notification._id) });
       } catch (error) {
         if (error.code !== 11000) throw error;
       }
     }
     return true;
-  } catch {
+  } catch (error) {
     // Activity and notifications are best effort after the primary write succeeds.
-    console.error("Could not persist project activity.");
+    console.error("Project event persistence failed.", { action: typeof action === "string" ? action : "unknown", code: error?.code || "unknown", name: error?.name || "Error" });
     return false;
   }
 }

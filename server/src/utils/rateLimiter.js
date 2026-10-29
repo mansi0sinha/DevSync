@@ -14,7 +14,7 @@ function createRateLimiter({ limit, windowMs, keyGenerator = (req) => req.ip || 
         }
       }
       if (buckets.size >= 10000 && !bucket) {
-        return res.status(429).json({ success: false, message: "Too many requests. Try again later." });
+        return res.status(429).json({ success: false, code: "RATE_LIMITED", message: "Too many requests. Try again later." });
       }
       bucket = { count: 0, expiresAt: now + windowMs };
       buckets.set(key, bucket);
@@ -22,7 +22,7 @@ function createRateLimiter({ limit, windowMs, keyGenerator = (req) => req.ip || 
 
     if (bucket.count >= limit) {
       res.set("Retry-After", String(Math.max(1, Math.ceil((bucket.expiresAt - now) / 1000))));
-      return res.status(429).json({ success: false, message: "Too many requests. Try again later." });
+      return res.status(429).json({ success: false, code: "RATE_LIMITED", message: "Too many requests. Try again later." });
     }
 
     bucket.count += 1;

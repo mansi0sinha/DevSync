@@ -104,8 +104,6 @@ const decisionSchema = new mongoose.Schema(
       trim: true,
       default: "Unknown",
     },
-    aiSuggestionId: { type: mongoose.Schema.Types.ObjectId, ref: "AISuggestion", default: null },
-    aiSuggestionItemKey: { type: String, default: null, maxlength: 40 },
   },
   {
     timestamps: true,
@@ -121,10 +119,6 @@ decisionSchema.index(
     partialFilterExpression: { discussionMessageId: { $type: "objectId" } },
   }
 );
-decisionSchema.index({ aiSuggestionId: 1, aiSuggestionItemKey: 1 }, {
-  unique: true,
-  partialFilterExpression: { aiSuggestionId: { $type: "objectId" } },
-});
 
 // Export model
 module.exports =

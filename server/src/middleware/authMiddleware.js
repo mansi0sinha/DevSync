@@ -2,6 +2,7 @@
 const jwt = require("jsonwebtoken");
 const mongoose = require("mongoose");
 const User = require("../models/User");
+const { diagnoseMongoError, isDatabaseUnavailableError } = require("../config/db");
 
 async function authenticateToken(token) {
   if (typeof token !== "string" || !token || token.length > 8192) {
@@ -35,6 +36,14 @@ const authMiddleware = async (req, res, next) => {
     req.user = await authenticateToken(parts[1]);
     next();
   } catch (error) {
+    if (isDatabaseUnavailableError(error)) {
+      console.error(`Authentication lookup failed: ${diagnoseMongoError(error)}`);
+      return res.status(503).json({
+        success: false,
+        code: "DATABASE_UNAVAILABLE",
+        message: "DevSync could not verify your session because the database connection was interrupted. Please try again shortly.",
+      });
+    }
     return res.status(401).json({
       success: false,
       message: "Invalid or expired token.",

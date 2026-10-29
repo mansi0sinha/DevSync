@@ -1,7 +1,7 @@
 
 import { useEffect, useState } from "react";
 import ThemeToggle from "../ui/ThemeToggle";
-import { Search, PanelLeft } from "lucide-react";
+import { Search, PanelLeft, Menu } from "lucide-react";
 import { getRealtimeStatus, subscribeRealtime, subscribeRealtimeStatus } from "../../services/realtime";
 import NotificationPanel from "./NotificationPanel";
 
@@ -13,10 +13,9 @@ const pageTitles = {
   settings: "Settings",
   activity: "Activity",
   search: "Search",
-  "ai-suggestions": "AI Suggestions",
 };
 
-export default function Header({ activePage = "dashboard", workspaceId, projectId, onNavigate, onOpenTask, onOpenDecision, onOpenDiscussion }) {
+export default function Header({ activePage = "dashboard", onNavigate, onOpenNotification, onToggleNavigation, mobileNavOpen = false, mobileNavToggleRef }) {
   const [realtimeStatus, setRealtimeStatus] = useState(getRealtimeStatus());
   const [onlineCount, setOnlineCount] = useState(0);
 
@@ -42,6 +41,7 @@ export default function Header({ activePage = "dashboard", workspaceId, projectI
     <header className="flex h-16 shrink-0 items-center justify-between border-b border-line bg-surface px-3 sm:px-6">
       {/* Current page */}
       <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+        <button ref={mobileNavToggleRef} id="mobile-navigation-toggle" type="button" onClick={onToggleNavigation} aria-label={mobileNavOpen ? "Close navigation menu" : "Open navigation menu"} aria-expanded={mobileNavOpen} aria-controls="primary-sidebar" className="inline-flex shrink-0 rounded-md p-2 text-muted hover:bg-hover hover:text-text sm:hidden"><Menu size={20}/></button>
         <PanelLeft
           size={18}
           strokeWidth={1.8}
@@ -78,7 +78,7 @@ export default function Header({ activePage = "dashboard", workspaceId, projectI
         </button>
 
         {/* Notifications */}
-        <NotificationPanel workspaceId={workspaceId} projectId={projectId} onOpenTask={onOpenTask} onOpenDecision={onOpenDecision} onOpenDiscussion={onOpenDiscussion} />
+        <NotificationPanel onOpenNotification={onOpenNotification} />
 
         <div className="mx-1 hidden h-5 w-px bg-line sm:block" />
 

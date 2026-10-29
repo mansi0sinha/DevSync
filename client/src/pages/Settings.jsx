@@ -1,41 +1,8 @@
-
-import { useState } from "react";
-import {
-  UserRound,
-  Building2,
-  Bell,
-  ShieldCheck,
-  Palette,
-  Save,
-  Check,
-  Sun,
-  Moon,
-  Monitor,
-  RotateCcw,
-} from "lucide-react";
+import { useEffect, useState } from "react";
+import { Bell, Building2, Check, LogOut, Palette, Save, ShieldCheck, UserRound } from "lucide-react";
 import Button from "../components/ui/Button";
 import { useTheme } from "../components/ui/ThemeContext";
-
-const DEFAULT_PROFILE = {
-  name: "Your Name",
-  username: "developer",
-  email: "you@example.com",
-  bio: "Building software and solving problems.",
-};
-
-const DEFAULT_WORKSPACE = {
-  name: "My Workspace",
-  description: "A space for engineering collaboration.",
-};
-
-const DEFAULT_NOTIFICATIONS = {
-  discussions: true,
-  taskUpdates: true,
-  decisions: true,
-  weeklySummary: false,
-};
-
-const DEFAULT_THEME = "light";
+import { authAPI, workspaceAPI } from "../services/api";
 
 const sections = [
   { id: "profile", label: "Profile", icon: UserRound },
@@ -45,547 +12,86 @@ const sections = [
   { id: "security", label: "Security", icon: ShieldCheck },
 ];
 
-function readStored(key, fallback) {
-  try {
-    const value = localStorage.getItem(key);
-    return value ? { ...fallback, ...JSON.parse(value) } : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function Settings() {
-  const [activeSection, setActiveSection] = useState("profile");
+export default function Settings({ user, workspace, project, canManageWorkspace = false, onMemberRoleChange, onDeleteWorkspace, onDeleteProject, onUserUpdate, onLogout }) {
+  const [active, setActive] = useState("profile");
+  const [profile, setProfile] = useState({ name: user?.name || "", username: user?.username || "", bio: user?.bio || "" });
+  const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [saveError, setSaveError] = useState("");
+  const [error, setError] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleteConfirmation, setDeleteConfirmation] = useState("");
+  const [deleteError, setDeleteError] = useState("");
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [members, setMembers] = useState([]);
+  const [pendingInvitations, setPendingInvitations] = useState([]);
+  const [membersState, setMembersState] = useState("loading");
+  const [membersError, setMembersError] = useState("");
+  const [roleBusy, setRoleBusy] = useState("");
   const { theme, setTheme } = useTheme();
 
-  const [profile, setProfile] = useState(() =>
-    readStored("devsync-profile", DEFAULT_PROFILE)
-  );
-
-  const [workspace, setWorkspace] = useState(() =>
-    readStored("devsync-workspace", DEFAULT_WORKSPACE)
-  );
-
-  const [notifications, setNotifications] = useState(() =>
-    readStored("devsync-notifications", DEFAULT_NOTIFICATIONS)
-  );
-
-  function markChanged() {
-    setSaved(false);
-    setSaveError("");
-  }
-
-  function updateProfile(event) {
-    const { name, value } = event.target;
-
-    setProfile((current) => ({ ...current, [name]: value }));
-    markChanged();
-  }
-
-  function updateWorkspace(event) {
-    const { name, value } = event.target;
-
-    setWorkspace((current) => ({ ...current, [name]: value }));
-    markChanged();
-  }
-
-  function toggleNotification(key) {
-    setNotifications((current) => ({
-      ...current,
-      [key]: !current[key],
-    }));
-    markChanged();
-  }
-
-  function changeTheme(nextTheme) {
-    setTheme(nextTheme);
-    setSaved(false);
-    setSaveError("");
-  }
-
-  function handleSave(event) {
-    event.preventDefault();
-    setSaveError("");
-
-    if (!profile.name.trim()) {
-      setSaveError("Please enter your full name.");
-      setActiveSection("profile");
-      return;
+  useEffect(() => {
+    let cancelled = false;
+    async function loadMembers() {
+      if (!workspace?._id) { setMembers([]); setMembersState("empty"); return; }
+      setMembersState("loading"); setMembersError("");
+      try {
+        const result = await workspaceAPI.getMemberManagement(workspace._id);
+        if (!cancelled) { setMembers(result.members || []); setPendingInvitations(result.pendingInvitations || []); setMembersState("ready"); }
+      } catch (cause) {
+        if (!cancelled) { setMembersError(cause.message || "Workspace members could not be loaded."); setMembersState("error"); }
+      }
     }
+    loadMembers();
+    return () => { cancelled = true; };
+  }, [workspace?._id]);
 
-    if (!/^[a-zA-Z0-9_-]{3,25}$/.test(profile.username)) {
-      setSaveError(
-        "Username must be 3–25 characters using letters, numbers, underscores, or hyphens."
-      );
-      setActiveSection("profile");
-      return;
-    }
-
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(profile.email)) {
-      setSaveError("Please enter a valid email address.");
-      setActiveSection("profile");
-      return;
-    }
-
-    if (!workspace.name.trim()) {
-      setSaveError("Please enter a workspace name.");
-      setActiveSection("workspace");
-      return;
-    }
-
+  async function changeMemberRole(member, role) {
+    const memberId = String(member.user?._id || "");
+    if (!memberId || roleBusy || !onMemberRoleChange) return;
+    setRoleBusy(memberId); setMembersError("");
     try {
-      localStorage.setItem("devsync-profile", JSON.stringify(profile));
-      localStorage.setItem("devsync-workspace", JSON.stringify(workspace));
-      localStorage.setItem(
-        "devsync-notifications",
-        JSON.stringify(notifications)
-      );
-      localStorage.setItem("devsync-theme", theme);
-
-      setSaved(true);
-    } catch {
-      setSaveError(
-        "Your browser could not save these settings. Check your storage permissions."
-      );
-      setSaved(false);
-    }
+      await onMemberRoleChange(memberId, role);
+      const result = await workspaceAPI.getMemberManagement(workspace._id);
+      setMembers(result.members || []); setPendingInvitations(result.pendingInvitations || []);
+    } catch (cause) { setMembersError(cause.message || "Member role could not be updated."); }
+    finally { setRoleBusy(""); }
   }
 
-  function resetSettings() {
-    setProfile({ ...DEFAULT_PROFILE });
-    setWorkspace({ ...DEFAULT_WORKSPACE });
-    setNotifications({ ...DEFAULT_NOTIFICATIONS });
-    setTheme(DEFAULT_THEME);
-    setSaved(false);
-    setSaveError("");
+  async function revokeInvitation(invitationId) {
+    setRoleBusy(`invite:${invitationId}`); setMembersError("");
+    try {
+      await workspaceAPI.revokeInvitation(workspace._id, invitationId);
+      const result = await workspaceAPI.getMemberManagement(workspace._id);
+      setMembers(result.members || []); setPendingInvitations(result.pendingInvitations || []);
+    } catch (cause) { setMembersError(cause.message || "Invitation could not be revoked."); }
+    finally { setRoleBusy(""); }
   }
 
-  const fieldClass =
-    "mt-2 w-full rounded-lg border border-line bg-bg px-3 py-2.5 text-sm text-text outline-none placeholder:text-muted focus:border-acc";
-
-  const notificationOptions = [
-    {
-      key: "discussions",
-      title: "Discussion messages",
-      description: "When someone posts in a team discussion.",
-    },
-    {
-      key: "taskUpdates",
-      title: "Task updates",
-      description: "When tasks are created or their status changes.",
-    },
-    {
-      key: "decisions",
-      title: "Decision updates",
-      description: "When a team decision is recorded or updated.",
-    },
-    {
-      key: "weeklySummary",
-      title: "Weekly summary",
-      description: "A summary of activity across your workspace.",
-    },
-  ];
-
-  function renderSection() {
-    switch (activeSection) {
-      case "profile":
-        return (
-          <>
-            <div className="mb-6">
-              <h2 className="text-lg font-semibold text-text">Profile</h2>
-              <p className="mt-1 text-sm text-muted">
-                Manage the personal information shown to your team.
-              </p>
-            </div>
-
-            <div className="mb-6 flex items-center gap-4 rounded-xl border border-line bg-bg p-4">
-              <div className="flex h-14 w-14 items-center justify-center rounded-full border border-line bg-hover text-lg font-semibold text-text">
-                {profile.name.trim().charAt(0).toUpperCase() || "U"}
-              </div>
-              <div className="min-w-0">
-                <p className="truncate font-semibold text-text">
-                  {profile.name || "Your Name"}
-                </p>
-                <p className="mt-1 text-sm text-muted">
-                  @{profile.username || "username"}
-                </p>
-                <p className="mt-1 text-xs text-muted">Profile preview</p>
-              </div>
-            </div>
-
-            <div className="grid gap-5 sm:grid-cols-2">
-              <label className="text-sm font-medium text-text">
-                Full name
-                <input
-                  name="name"
-                  value={profile.name}
-                  onChange={updateProfile}
-                  maxLength={80}
-                  className={fieldClass}
-                  placeholder="Enter your name"
-                />
-              </label>
-
-              <label className="text-sm font-medium text-text">
-                Username
-                <input
-                  name="username"
-                  value={profile.username}
-                  onChange={updateProfile}
-                  maxLength={25}
-                  className={fieldClass}
-                  placeholder="Choose a username"
-                />
-              </label>
-
-              <label className="text-sm font-medium text-text sm:col-span-2">
-                Email address
-                <input
-                  type="email"
-                  name="email"
-                  value={profile.email}
-                  onChange={updateProfile}
-                  className={fieldClass}
-                  placeholder="you@example.com"
-                />
-              </label>
-
-              <label className="text-sm font-medium text-text sm:col-span-2">
-                Short bio
-                <textarea
-                  name="bio"
-                  value={profile.bio}
-                  onChange={updateProfile}
-                  rows={3}
-                  maxLength={160}
-                  className={`${fieldClass} resize-y`}
-                  placeholder="Tell your team about yourself"
-                />
-                <span className="mt-1 block text-right text-xs font-normal text-muted">
-                  {profile.bio.length}/160
-                </span>
-              </label>
-            </div>
-          </>
-        );
-
-      case "workspace":
-        return (
-          <>
-            <div className="mb-6">
-              <h2 className="text-lg font-semibold text-text">Workspace</h2>
-              <p className="mt-1 text-sm text-muted">
-                Configure your shared engineering workspace.
-              </p>
-            </div>
-
-            <div className="space-y-5">
-              <label className="block text-sm font-medium text-text">
-                Workspace name
-                <input
-                  name="name"
-                  value={workspace.name}
-                  onChange={updateWorkspace}
-                  maxLength={80}
-                  className={fieldClass}
-                  placeholder="My Workspace"
-                />
-              </label>
-
-              <label className="block text-sm font-medium text-text">
-                Description
-                <textarea
-                  name="description"
-                  value={workspace.description}
-                  onChange={updateWorkspace}
-                  rows={3}
-                  maxLength={300}
-                  className={`${fieldClass} resize-y`}
-                  placeholder="What is this workspace for?"
-                />
-              </label>
-
-              <div className="rounded-lg border border-line bg-bg p-4">
-                <p className="text-sm font-semibold text-text">
-                  Workspace plan
-                </p>
-                <p className="mt-1 text-sm text-muted">Free plan · Demo</p>
-                <p className="mt-3 text-xs leading-5 text-muted">
-                  Workspace preferences are saved in this browser. Team
-                  membership and billing require a backend.
-                </p>
-              </div>
-            </div>
-          </>
-        );
-
-      case "notifications":
-        return (
-          <>
-            <div className="mb-6">
-              <h2 className="text-lg font-semibold text-text">
-                Notifications
-              </h2>
-              <p className="mt-1 text-sm text-muted">
-                Choose which updates you want to enable in your preferences.
-              </p>
-            </div>
-
-            <div className="divide-y divide-line">
-              {notificationOptions.map((item) => (
-                <div
-                  key={item.key}
-                  className="flex items-center justify-between gap-4 py-4"
-                >
-                  <div>
-                    <p className="text-sm font-medium text-text">
-                      {item.title}
-                    </p>
-                    <p className="mt-1 text-xs leading-5 text-muted">
-                      {item.description}
-                    </p>
-                  </div>
-
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={notifications[item.key]}
-                    aria-label={item.title}
-                    onClick={() => toggleNotification(item.key)}
-                    className={`relative h-6 w-11 shrink-0 rounded-full border border-line ${
-                      notifications[item.key] ? "bg-acc" : "bg-hover"
-                    }`}
-                  >
-                    <span
-                      className={`absolute top-0.5 h-4 w-4 rounded-full ${
-                        notifications[item.key]
-                          ? "left-5.5 bg-onAcc"
-                          : "left-0.5 bg-muted"
-                      }`}
-                    />
-                  </button>
-                </div>
-              ))}
-            </div>
-
-            <p className="mt-4 text-xs text-muted">
-              These are saved preferences only. Email and push delivery will
-              be connected when notification services are added.
-            </p>
-          </>
-        );
-
-      case "appearance":
-        return (
-          <>
-            <div className="mb-6">
-              <h2 className="text-lg font-semibold text-text">Appearance</h2>
-              <p className="mt-1 text-sm text-muted">
-                Choose how DevSync looks on this device.
-              </p>
-            </div>
-
-            <div className="grid gap-3 sm:grid-cols-3">
-              {[
-                {
-                  id: "light",
-                  label: "Light",
-                  description: "Bright workspace",
-                  icon: Sun,
-                },
-                {
-                  id: "dark",
-                  label: "Dark",
-                  description: "Low-light workspace",
-                  icon: Moon,
-                },
-                {
-                  id: "system",
-                  label: "System",
-                  description: "Follow your device",
-                  icon: Monitor,
-                },
-              ].map((option) => {
-                const Icon = option.icon;
-                const selected = theme === option.id;
-
-                return (
-                  <button
-                    key={option.id}
-                    type="button"
-                    aria-pressed={selected}
-                    onClick={() => changeTheme(option.id)}
-                    className={`rounded-xl border p-4 text-left ${
-                      selected
-                        ? "border-acc bg-accSoft"
-                        : "border-line bg-bg hover:bg-hover"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <Icon size={20} className="text-text" />
-                      {selected && <Check size={17} className="text-acc" />}
-                    </div>
-                    <p className="mt-4 text-sm font-semibold text-text">
-                      {option.label}
-                    </p>
-                    <p className="mt-1 text-xs text-muted">
-                      {option.description}
-                    </p>
-                  </button>
-                );
-              })}
-            </div>
-
-            <div className="mt-5 rounded-xl border border-line bg-bg p-4">
-              <p className="text-sm font-semibold text-text">
-                Theme preview
-              </p>
-              <div className="mt-3 flex items-center gap-3 rounded-lg border border-line bg-surface p-3">
-                <div className="h-8 w-1 rounded-full bg-acc" />
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-semibold text-text">
-                    Engineering workspace
-                  </p>
-                  <p className="mt-1 text-xs text-muted">
-                    Your selected theme applies immediately.
-                  </p>
-                </div>
-                <span className="rounded-md bg-accSoft px-2 py-1 text-xs font-medium text-acc">
-                  Active
-                </span>
-              </div>
-            </div>
-          </>
-        );
-
-      case "security":
-        return (
-          <>
-            <div className="mb-6">
-              <h2 className="text-lg font-semibold text-text">Security</h2>
-              <p className="mt-1 text-sm text-muted">
-                Account security controls will be connected with authentication.
-              </p>
-            </div>
-
-            <div className="space-y-4">
-              <div className="rounded-xl border border-line bg-bg p-4">
-                <p className="text-sm font-semibold text-text">
-                  Authentication
-                </p>
-                <p className="mt-1 text-sm text-muted">
-                  Login, password changes, and session protection are not
-                  available until the backend authentication system is built.
-                </p>
-                <span className="mt-3 inline-flex rounded-md border border-line px-2 py-1 text-xs text-muted">
-                  Not configured
-                </span>
-              </div>
-
-              <div className="rounded-xl border border-line bg-bg p-4">
-                <p className="text-sm font-semibold text-text">
-                  Active sessions
-                </p>
-                <p className="mt-1 text-sm text-muted">
-                  There are no server-managed sessions in this frontend demo.
-                </p>
-              </div>
-            </div>
-          </>
-        );
-
-      default:
-        return null;
-    }
+  async function saveProfile(event) {
+    event.preventDefault(); setBusy(true); setSaved(false); setError("");
+    try {
+      const result = await authAPI.updateProfile(profile);
+      const updated = result.user || result.data?.user;
+      if (!updated) throw new Error("The server did not return the updated profile.");
+      setProfile({ name: updated.name || "", username: updated.username || "", bio: updated.bio || "" });
+      onUserUpdate?.(updated); setSaved(true);
+    } catch (cause) { setError(cause.message || "Profile could not be saved."); }
+    finally { setBusy(false); }
   }
 
-  return (
-    <div className="mx-auto max-w-6xl">
-      <div className="mb-8">
-        <p className="font-mono text-xs uppercase tracking-[0.12em] text-muted">
-          Workspace configuration
-        </p>
-        <h1 className="mt-2 text-2xl font-semibold tracking-tight text-text">
-          Settings
-        </h1>
-        <p className="mt-2 text-sm text-muted">
-          Manage your profile and customize your DevSync workspace.
-        </p>
-      </div>
-
-      <div className="grid items-start gap-6 lg:grid-cols-[220px_minmax(0,1fr)]">
-        <nav className="rounded-xl border border-line bg-surface p-2">
-          {sections.map((section) => {
-            const Icon = section.icon;
-            const active = activeSection === section.id;
-
-            return (
-              <button
-                key={section.id}
-                type="button"
-                onClick={() => {
-                  setActiveSection(section.id);
-                  setSaved(false);
-                  setSaveError("");
-                }}
-                className={`mb-1 flex min-h-10 w-full items-center gap-3 rounded-lg px-3 text-left text-sm ${
-                  active
-                    ? "bg-hover font-semibold text-text"
-                    : "text-muted hover:bg-hover hover:text-text"
-                }`}
-              >
-                <Icon size={17} strokeWidth={1.8} />
-                {section.label}
-              </button>
-            );
-          })}
-        </nav>
-
-        <form
-          onSubmit={handleSave}
-          className="overflow-hidden rounded-xl border border-line bg-surface"
-        >
-          <div className="p-5 sm:p-7">{renderSection()}</div>
-
-          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line bg-bg px-5 py-4 sm:px-7">
-            <div className="flex min-w-0 flex-1 items-center gap-2">
-              <p className="text-xs text-muted">
-                Saved locally in this browser.
-              </p>
-              {saved && (
-                <span className="flex items-center gap-1 text-xs font-medium text-acc">
-                  <Check size={14} /> Saved
-                </span>
-              )}
-              {saveError && (
-                <p role="alert" className="text-xs text-red-600">
-                  {saveError}
-                </p>
-              )}
-            </div>
-
-            <div className="flex items-center gap-2">
-              <Button
-                type="button"
-                variant="secondary"
-                size="md"
-                onClick={resetSettings}
-              >
-                <RotateCcw size={15} />
-                Reset
-              </Button>
-              <Button type="submit" size="md">
-                <Save size={16} />
-                Save changes
-              </Button>
-            </div>
-          </div>
-        </form>
-      </div>
+  const inputClass = "mt-1.5 w-full rounded-lg border border-line bg-bg px-3 py-2.5 text-sm outline-none focus:border-acc";
+  return <div className="mx-auto max-w-6xl">
+    <div className="mb-7"><p className="font-mono text-xs uppercase tracking-[0.12em] text-muted">Account and workspace</p><h1 className="mt-2 text-2xl font-semibold tracking-tight">Settings</h1><p className="mt-2 text-sm text-muted">Manage your profile and preferences.</p></div>
+    <div className="grid items-start gap-5 lg:grid-cols-[210px_minmax(0,1fr)]">
+      <nav aria-label="Settings sections" className="flex gap-1 overflow-x-auto rounded-xl border border-line bg-surface p-2 lg:block">{sections.map(({ id, label, icon: Icon }) => <button key={id} type="button" onClick={() => { setActive(id); setError(""); setSaved(false); }} aria-current={active === id ? "page" : undefined} className={`flex min-h-10 shrink-0 items-center gap-2 rounded-lg px-3 text-sm ${active === id ? "bg-hover font-semibold" : "text-muted hover:bg-hover hover:text-text"}`}><Icon size={16}/>{label}</button>)}</nav>
+      <section className="overflow-hidden rounded-xl border border-line bg-surface">
+        {active === "profile" && <form onSubmit={saveProfile} className="p-5 sm:p-7"><h2 className="text-lg font-semibold">Profile</h2><p className="mt-1 text-sm text-muted">This information is saved to your account and shown to your team.</p><div className="my-6 flex items-center gap-3 rounded-xl border border-line bg-bg p-4"><div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-full bg-hover text-lg font-semibold">{user?.avatar ? <img src={user.avatar} alt="Profile" className="h-full w-full object-cover"/> : (profile.name || user?.email || "U").slice(0, 1).toUpperCase()}</div><div><p className="font-semibold">{profile.name || "Your name"}</p><p className="text-sm text-muted">{user?.email}</p><p className="mt-1 text-xs text-muted">Profile image upload is not available in the current upload API.</p></div></div><div className="grid gap-4 sm:grid-cols-2"><label className="text-sm font-medium">Full name<input className={inputClass} name="name" value={profile.name} onChange={(e) => setProfile({ ...profile, name: e.target.value })} minLength={2} maxLength={100} required/></label><label className="text-sm font-medium">Username<input className={inputClass} name="username" value={profile.username} onChange={(e) => setProfile({ ...profile, username: e.target.value })} pattern="[a-zA-Z0-9_-]{3,25}" minLength={3} maxLength={25} required/></label><label className="text-sm font-medium sm:col-span-2">Email address<input className={`${inputClass} opacity-70`} value={user?.email || ""} readOnly aria-readonly="true"/><span className="mt-1 block text-xs font-normal text-muted">Email changes are not supported by this authentication flow.</span></label><label className="text-sm font-medium sm:col-span-2">Bio<textarea className={`${inputClass} resize-y`} rows={3} maxLength={160} value={profile.bio} onChange={(e) => setProfile({ ...profile, bio: e.target.value })}/></label></div><div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4">{error ? <p role="alert" className="text-sm text-red-600">{error}</p> : saved ? <p role="status" className="flex items-center gap-1 text-sm text-acc"><Check size={15}/> Saved to your account</p> : <span/>}<Button type="submit" loading={busy} disabled={busy}><Save size={15}/> Save profile</Button></div></form>}
+        {active === "workspace" && <div className="p-5 sm:p-7"><h2 className="text-lg font-semibold">Workspace</h2><p className="mt-1 text-sm text-muted">Details for the workspace selected in the sidebar.</p><dl className="mt-6 divide-y divide-line rounded-xl border border-line">{[["Name", workspace?.name || "—"], ["Description", workspace?.description || "No description"], ["Your role", workspace?.members?.find((item) => String(item.user?._id || item.user) === String(user?._id || user?.id))?.role || "Member"], ["Selected project", project?.name || "No project selected"]].map(([label, value]) => <div key={label} className="grid gap-1 p-4 sm:grid-cols-[150px_1fr]"><dt className="text-sm text-muted">{label}</dt><dd className="text-sm font-medium">{value}</dd></div>)}</dl><section className="mt-6 border-t border-line pt-5"><h3 className="font-semibold">Workspace members</h3><p className="mt-1 text-sm text-muted">Member access and roles for this workspace.</p>{membersState === "loading" ? <p role="status" className="mt-4 text-sm text-muted">Loading members…</p> : membersState === "error" ? <p role="alert" className="mt-4 text-sm text-red-600">{membersError}</p> : members.length ? <ul className="mt-3 divide-y divide-line rounded-lg border border-line">{members.map((member) => { const id = String(member.user?._id || ""); const label = member.user?.name || member.user?.email || "Workspace member"; return <li key={id} className="flex flex-wrap items-center justify-between gap-3 p-3"><span className="min-w-0"><span className="block truncate text-sm font-medium">{label}</span><span className="block truncate text-xs text-muted">{member.user?.email}</span></span>{canManageWorkspace ? <label className="text-xs text-muted">Role <select aria-label={`Role for ${label}`} value={member.role} disabled={roleBusy === id || id === String(user?._id || user?.id)} onChange={(event) => changeMemberRole(member, event.target.value)} className="ml-2 rounded border border-line bg-bg px-2 py-1 text-sm text-text"><option>Admin</option><option>Member</option></select></label> : <span className="rounded border border-line px-2 py-1 text-xs">{member.role}</span>}</li>; })}</ul> : <p className="mt-3 text-sm text-muted">No workspace members found.</p>}{canManageWorkspace && pendingInvitations.length > 0 && <div className="mt-5"><h4 className="text-sm font-semibold">Pending invitations</h4><ul className="mt-2 divide-y divide-line rounded-lg border border-line">{pendingInvitations.map((invite) => <li key={`${invite.email}:${invite.createdAt}`} className="flex flex-wrap items-center justify-between gap-2 p-3 text-sm"><span>{invite.email}<span className="ml-2 text-xs text-muted">Expires {new Date(invite.expiresAt).toLocaleDateString()}</span></span><Button type="button" variant="secondary" disabled={roleBusy === `invite:${invite._id}`} onClick={() => revokeInvitation(invite._id)}>{roleBusy === `invite:${invite._id}` ? "Revoking…" : "Revoke"}</Button></li>)}</ul></div>}</section>{membersError && membersState !== "error" && <p role="alert" className="mt-3 text-sm text-red-600">{membersError}</p>}<p className="mt-4 text-xs text-muted">Workspace and project deletion is permanent and removes related tasks, discussions, decisions, uploads, and notifications.</p>{canManageWorkspace && <div className="mt-5 flex flex-wrap gap-2 border-t border-line pt-4"><Button type="button" variant="danger" disabled={!workspace} onClick={() => { setDeleteTarget("workspace"); setDeleteConfirmation(""); setDeleteError(""); }}>Delete workspace</Button><Button type="button" variant="danger" disabled={!project} onClick={() => { setDeleteTarget("project"); setDeleteConfirmation(""); setDeleteError(""); }}>Delete project</Button></div>}{!canManageWorkspace && <p className="mt-4 text-sm text-muted">Only workspace Admins can delete this workspace or its projects.</p>}</div>}
+        {active === "notifications" && <div className="p-5 sm:p-7"><h2 className="text-lg font-semibold">Notifications</h2><p className="mt-1 text-sm text-muted">The bell menu shows notifications from workspaces and projects you can currently access. Open a notification to switch to its project; access is checked again before the item is opened.</p><div className="mt-6 rounded-xl border border-line bg-bg p-4"><div className="flex items-start gap-3"><Bell size={18} className="mt-0.5 text-acc"/><div><p className="text-sm font-medium">In-app notifications</p><p className="mt-1 text-sm text-muted">Notification preference controls are not supported by the server yet, so this page does not show settings that only change locally.</p></div></div></div></div>}
+        {active === "appearance" && <div className="p-5 sm:p-7"><h2 className="text-lg font-semibold">Appearance</h2><p className="mt-1 text-sm text-muted">Choose how DevSync looks on this device.</p><div className="mt-6 grid gap-3 sm:grid-cols-3">{[["light", "Light", "Bright surfaces"], ["dark", "Dark", "Low-light surfaces"], ["system", "System", "Follow device"]].map(([id, label, description]) => <button key={id} type="button" aria-pressed={theme === id} onClick={() => setTheme(id)} className={`rounded-xl border p-4 text-left ${theme === id ? "border-acc bg-accSoft" : "border-line bg-bg hover:bg-hover"}`}><span className="font-semibold">{label}</span><span className="mt-1 block text-xs text-muted">{description}</span></button>)}</div><p className="mt-4 text-xs text-muted">Theme preference is saved on this device and applies immediately.</p></div>}
+        {active === "security" && <div className="p-5 sm:p-7"><h2 className="text-lg font-semibold">Security</h2><p className="mt-1 text-sm text-muted">Your account uses JWT authentication. Password changes and server-managed session lists are not part of the current API.</p><div className="mt-6 rounded-xl border border-line bg-bg p-4"><p className="font-medium">Signed in as</p><p className="mt-1 text-sm text-muted">{user?.email}</p><p className="mt-3 text-xs text-muted">Logging out clears this browser's saved session token.</p></div><Button type="button" variant="secondary" className="mt-4" onClick={onLogout}><LogOut size={15}/> Log out</Button></div>}
+      </section>
     </div>
-  );
+    {deleteTarget && <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !deleteBusy) setDeleteTarget(null); }}><form role="alertdialog" aria-modal="true" aria-labelledby="delete-resource-title" onSubmit={async (event) => { event.preventDefault(); if (deleteBusy) return; setDeleteBusy(true); setDeleteError(""); try { if (deleteTarget === "workspace") await onDeleteWorkspace?.(deleteConfirmation); else await onDeleteProject?.(deleteConfirmation); } catch (cause) { setDeleteError(cause.message || "Deletion failed. You can retry safely."); } finally { setDeleteBusy(false); } }} className="w-full max-w-md rounded-xl border border-line bg-surface p-6 shadow-xl"><h2 id="delete-resource-title" className="text-lg font-semibold">Permanently delete {deleteTarget}?</h2><p className="mt-2 text-sm text-muted">{deleteTarget === "workspace" ? <>This deletes <strong>{workspace?.name}</strong> and all its projects, discussions, decisions, tasks, attachments, and notifications.</> : <>This deletes <strong>{project?.name}</strong> and its discussions, decisions, tasks, attachments, and notifications.</>} This action cannot be undone.</p><label htmlFor="delete-resource-confirm" className="mt-4 block text-sm font-medium">Type <span className="font-semibold">{deleteTarget === "workspace" ? workspace?.name : project?.name}</span> to confirm</label><input id="delete-resource-confirm" autoFocus value={deleteConfirmation} onChange={(event) => setDeleteConfirmation(event.target.value)} className={inputClass} required/><p className="mt-2 text-xs text-muted">If cleanup fails partway through, the resource stays available for a safe retry.</p>{deleteError && <p role="alert" className="mt-3 text-sm text-red-600">{deleteError}</p>}<div className="mt-5 flex justify-end gap-2"><Button type="button" variant="secondary" disabled={deleteBusy} onClick={() => setDeleteTarget(null)}>Cancel</Button><Button type="submit" variant="danger" disabled={deleteBusy || deleteConfirmation !== (deleteTarget === "workspace" ? workspace?.name : project?.name)}>{deleteBusy ? "Deleting…" : "Delete permanently"}</Button></div></form></div>}
+  </div>;
 }
-
-export default Settings;

@@ -16,7 +16,8 @@ import {
 } from "lucide-react";
 
 import Button from "../components/ui/Button";
-import { taskAPI } from "../services/api";
+import { activityAPI, decisionAPI, taskAPI } from "../services/api";
+import { getActivityState, getDecisionCount } from "../services/dashboardData";
 
 function SectionHeading({ title, action, onAction }) {
   return (
@@ -95,24 +96,66 @@ function isInProgress(task) {
   );
 }
 
+function relativeTime(value) {
+  const timestamp = new Date(value).getTime();
+  if (Number.isNaN(timestamp)) return "Time unavailable";
+  const seconds = Math.round((timestamp - Date.now()) / 1000);
+  const units = [[60, "second"], [60, "minute"], [24, "hour"], [7, "day"], [4.35, "week"], [12, "month"], [Infinity, "year"]];
+  let amount = seconds;
+  for (const [threshold, unit] of units) {
+    if (Math.abs(amount) < threshold) return new Intl.RelativeTimeFormat(undefined, { numeric: "auto" }).format(amount, unit);
+    amount = Math.round(amount / threshold);
+  }
+  return "Time unavailable";
+}
+
 export default function Dashboard({
   onNavigate,
+  onOpenTask,
+  onOpenDiscussion,
+  onOpenDecision,
   workspaceId,
   projectId,
 }) {
   const [tasks, setTasks] = useState([]);
   const [loadingTasks, setLoadingTasks] = useState(false);
   const [taskError, setTaskError] = useState("");
+  const [activity, setActivity] = useState([]);
+  const [activityLoading, setActivityLoading] = useState(true);
+  const [activityError, setActivityError] = useState("");
+  const [decisionCount, setDecisionCount] = useState(0);
+  const [decisionsLoading, setDecisionsLoading] = useState(true);
+  const [decisionsError, setDecisionsError] = useState("");
+  const [overviewAttempt, setOverviewAttempt] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
-
-    if (!workspaceId || !projectId) {
-      setTasks([]);
-      setTaskError("");
-      setLoadingTasks(false);
-      return undefined;
+    async function load() {
+      if (!workspaceId || !projectId) {
+        setActivity([]); setActivityError(""); setActivityLoading(false);
+        setDecisionCount(0); setDecisionsError(""); setDecisionsLoading(false);
+        return;
+      }
+      setActivityLoading(true); setActivityError("");
+      setDecisionsLoading(true); setDecisionsError("");
+      const [activityResult, decisionResult] = await Promise.allSettled([
+        activityAPI.getAll(workspaceId, projectId, { limit: 6 }),
+        decisionAPI.getAll(workspaceId, projectId),
+      ]);
+      if (cancelled) return;
+      if (activityResult.status === "fulfilled") setActivity(activityResult.value.data || []);
+      else { setActivity([]); setActivityError(activityResult.reason?.message || "Could not load recent activity."); }
+      if (decisionResult.status === "fulfilled") {
+        setDecisionCount(getDecisionCount(decisionResult.value));
+      } else { setDecisionCount(0); setDecisionsError(decisionResult.reason?.message || "Could not load decisions."); }
+      setActivityLoading(false); setDecisionsLoading(false);
     }
+    void load();
+    return () => { cancelled = true; };
+  }, [workspaceId, projectId, overviewAttempt]);
+
+  useEffect(() => {
+    let cancelled = false;
 
     async function fetchTasks() {
       setLoadingTasks(true);
@@ -178,12 +221,12 @@ export default function Dashboard({
       },
       {
         label: "Decisions logged",
-        value: "—",
-        detail: "Decision data not connected",
+        value: decisionCount,
+        detail: decisionsError ? "Decision count unavailable" : "Recorded for this project",
         icon: GitMerge,
       },
     ];
-  }, [tasks]);
+  }, [tasks, decisionCount, decisionsError]);
 
   const recentTasks = useMemo(() => {
     return [...tasks]
@@ -196,6 +239,7 @@ export default function Dashboard({
   }, [tasks]);
 
   const hasProject = Boolean(workspaceId && projectId);
+  const activityState = getActivityState({ loading: activityLoading, error: activityError, items: activity });
 
   return (
     <div className="mx-auto w-full max-w-7xl space-y-8 pb-8">
@@ -281,7 +325,7 @@ export default function Dashboard({
       )}
 
       {/* Real task statistics */}
-      {hasProject && !taskError && (
+      {hasProject && (
         <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
           {stats.map((stat) => {
             const Icon = stat.icon;
@@ -304,17 +348,20 @@ export default function Dashboard({
                 </div>
 
                 <p className="mt-5 font-mono text-3xl font-medium tracking-tight text-text">
-                  {loadingTasks ? (
+                  {(stat.label === "Decisions logged" ? decisionsLoading : loadingTasks) ? (
                     <LoaderCircle
                       size={25}
                       className="animate-spin text-muted"
                     />
                   ) : (
-                    stat.value
+                    stat.label === "Decisions logged"
+                      ? decisionsError ? "!" : decisionCount
+                      : taskError ? "!" : stat.value
                   )}
                 </p>
 
-                <p className="mt-2 text-xs text-muted">{stat.detail}</p>
+                <p className="mt-2 text-xs text-muted">{stat.label === "Decisions logged" && decisionsError ? "Decision count unavailable" : taskError && stat.label !== "Decisions logged" ? "Task data unavailable" : stat.detail}</p>
+                {((stat.label === "Decisions logged" && decisionsError) || (stat.label !== "Decisions logged" && taskError)) && <button type="button" onClick={() => setOverviewAttempt((attempt) => attempt + 1)} className="mt-2 text-xs font-medium text-acc hover:underline">Retry</button>}
               </div>
             );
           })}
@@ -408,11 +455,16 @@ export default function Dashboard({
               onAction={() => onNavigate?.("discussion")}
             />
 
-            <EmptyState
-              icon={MessageSquare}
-              title="Activity feed isn't connected yet"
-              description="Once real activity events are recorded, recent task, discussion, and decision changes will appear here."
-            />
+            {!workspaceId || !projectId ? <EmptyState icon={MessageSquare} title="Select a project" description="Choose a project to see its recent activity." /> : activityState === "loading" ? <div role="status" className="flex items-center justify-center gap-2 py-10 text-sm text-muted"><LoaderCircle size={17} className="animate-spin" />Loading recent activity…</div> : activityState === "error" ? <div className="py-6 text-center"><p role="alert" className="text-sm text-red-600 dark:text-red-300">{activityError}</p><button type="button" onClick={() => setOverviewAttempt((attempt) => attempt + 1)} className="mt-2 text-sm font-medium text-acc hover:underline">Try again</button></div> : activityState === "empty" ? <EmptyState icon={MessageSquare} title="No recent activity yet" description="Task, discussion, decision, and pull request events for this project will appear here." /> : <div className="divide-y divide-line">{activity.map((item) => {
+              const type = item.entityType === "task" ? "Task" : item.entityType === "decision" ? "Decision" : "Discussion";
+              const open = () => {
+                if (!item.relatedAvailable) return;
+                if (item.entityType === "task") onOpenTask?.(String(item.entityId));
+                else if (item.entityType === "decision") onOpenDecision?.(String(item.entityId));
+                else if (item.entityType === "discussion") onOpenDiscussion?.(String(item.entityId));
+              };
+              return <article key={item._id} className="flex items-start gap-3 py-3 first:pt-1 last:pb-1"><span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-acc"/><div className="min-w-0 flex-1"><p className="text-sm leading-5 text-text"><span className="font-semibold">{item.actorType === "system" ? "GitHub" : item.actor?.name || "A member"}</span> {item.summary}</p><div className="mt-1 flex items-center gap-2 text-[11px] text-muted"><span>{type}</span><span aria-hidden="true">·</span><time dateTime={item.createdAt}>{relativeTime(item.createdAt)}</time></div></div>{item.relatedAvailable && <button type="button" onClick={open} className="shrink-0 rounded-md px-2 py-1 text-xs font-medium text-acc hover:bg-hover" aria-label={`Open ${type.toLowerCase()}: ${item.summary}`}>Open</button>}</article>;
+            })}</div>}
           </div>
         </section>
       )}

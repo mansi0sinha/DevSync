@@ -153,7 +153,7 @@ router.patch("/:id/status", async (req, res) => {
     const access = await findOwnedDecision(req.params.id, req.user._id, false);
     if (access.status) return res.status(access.status).json({ message: access.message });
     const previousStatus = access.decision.lifecycleStatus;
-    const result = await populated(Decision.findOneAndUpdate({ _id: access.decision._id, workspace: access.workspace._id, projectRef: access.project._id, deletedAt: null }, { $set: { lifecycleStatus: req.body.lifecycleStatus } }, { new: true, runValidators: true }));
+    const result = await populated(Decision.findOneAndUpdate({ _id: access.decision._id, workspace: access.workspace._id, projectRef: access.project._id, deletedAt: null }, { $set: { lifecycleStatus: req.body.lifecycleStatus } }, { returnDocument: "after", runValidators: true }));
     if (result && previousStatus !== result.lifecycleStatus) await recordProjectEvent({
       io: req.app.get("io"), actorId: req.user._id, workspaceId: access.workspace._id, projectId: access.project._id,
       action: "decision.status_changed", summary: `Changed decision status: ${result.title}`,
@@ -175,7 +175,7 @@ router.patch("/:id/supersede", async (req, res) => {
     if (original.status) return res.status(original.status).json({ message: original.message });
     const replacement = await Decision.findOne({ _id: replacementId, workspace: original.workspace._id, projectRef: original.decision.projectRef, deletedAt: null });
     if (!replacement) return res.status(404).json({ message: "Replacement decision not found in this project." });
-    const updated = await populated(Decision.findOneAndUpdate({ _id: original.decision._id, workspace: original.workspace._id, projectRef: original.project._id, deletedAt: null }, { $set: { lifecycleStatus: "Superseded", supersededBy: replacement._id } }, { new: true, runValidators: true }));
+    const updated = await populated(Decision.findOneAndUpdate({ _id: original.decision._id, workspace: original.workspace._id, projectRef: original.project._id, deletedAt: null }, { $set: { lifecycleStatus: "Superseded", supersededBy: replacement._id } }, { returnDocument: "after", runValidators: true }));
     if (updated) {
       const linkedTaskId = updated.linkedTask?._id || updated.linkedTask;
       const sourceDiscussionId = updated.discussionId?._id || updated.discussionId;
@@ -202,7 +202,7 @@ router.delete("/:id", async (req, res) => {
   try {
     const access = await findOwnedDecision(req.params.id, req.user._id, false);
     if (access.status) return res.status(access.status).json({ message: access.message });
-    const updated = await populated(Decision.findOneAndUpdate({ _id: access.decision._id, workspace: access.workspace._id, projectRef: access.project._id, deletedAt: null }, { $set: { deletedAt: new Date(), deletedBy: req.user.name || req.user.email } }, { new: true, runValidators: true }));
+    const updated = await populated(Decision.findOneAndUpdate({ _id: access.decision._id, workspace: access.workspace._id, projectRef: access.project._id, deletedAt: null }, { $set: { deletedAt: new Date(), deletedBy: req.user.name || req.user.email } }, { returnDocument: "after", runValidators: true }));
     if (updated) await recordProjectEvent({ io: req.app.get("io"), actorId: req.user._id, workspaceId: access.workspace._id, projectId: access.project._id, action: "decision.trashed", summary: `Moved decision to trash: ${updated.title}`, entityType: "decision", entityId: updated._id, eventKey: `decision.trashed:${updated._id}:${updated.updatedAt?.getTime() || Date.now()}` });
     return res.status(200).json({ message: "Decision moved to the Recycle Bin.", decision: updated });
   } catch (error) {
@@ -216,7 +216,7 @@ router.post("/:id/restore", async (req, res) => {
     const access = await findOwnedDecision(req.params.id, req.user._id, true);
     if (access.status) return res.status(access.status).json({ message: access.message });
     if (!access.decision.deletedAt) return res.status(404).json({ message: "Deleted decision not found." });
-    const updated = await populated(Decision.findOneAndUpdate({ _id: access.decision._id, workspace: access.workspace._id, projectRef: access.project._id, deletedAt: { $ne: null } }, { $set: { deletedAt: null, deletedBy: null } }, { new: true, runValidators: true }));
+    const updated = await populated(Decision.findOneAndUpdate({ _id: access.decision._id, workspace: access.workspace._id, projectRef: access.project._id, deletedAt: { $ne: null } }, { $set: { deletedAt: null, deletedBy: null } }, { returnDocument: "after", runValidators: true }));
     if (updated) await recordProjectEvent({ io: req.app.get("io"), actorId: req.user._id, workspaceId: access.workspace._id, projectId: access.project._id, action: "decision.restored", summary: `Restored decision: ${updated.title}`, entityType: "decision", entityId: updated._id, eventKey: `decision.restored:${updated._id}:${updated.updatedAt?.getTime() || Date.now()}` });
     return res.status(200).json({ message: "Decision restored successfully.", decision: updated });
   } catch (error) {

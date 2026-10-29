@@ -4,6 +4,8 @@ const mongoose = require("mongoose");
 const Project = require("../models/Project");
 const Workspace = require("../models/Workspace");
 const authMiddleware = require("../middleware/authMiddleware");
+const { deleteProject } = require("../services/resourceDeletion");
+const { canAdministerWorkspace } = require("../utils/workspacePermissions");
 
 const router = express.Router();
 
@@ -160,6 +162,24 @@ router.get("/workspaces/:workspaceId/projects", authMiddleware, async (req, res)
       success: false,
       message: "Server error while fetching projects.",
     });
+  }
+});
+
+router.delete("/workspaces/:workspaceId/projects/:projectId", authMiddleware, async (req, res) => {
+  try {
+    if (!mongoose.isObjectIdOrHexString(req.params.workspaceId) || !mongoose.isObjectIdOrHexString(req.params.projectId)) return res.status(400).json({ success: false, message: "Invalid workspace or project ID." });
+    const result = await getWorkspaceMembership(req.params.workspaceId, req.user._id);
+    if (result.error === "invalid") return res.status(400).json({ success: false, message: "Invalid workspace ID." });
+    if (result.error === "not_found") return res.status(404).json({ success: false, message: "Workspace not found." });
+    if (result.error === "forbidden") return res.status(403).json({ success: false, message: "You are not a member of this workspace." });
+    if (!canAdministerWorkspace(result.workspace, req.user._id)) return res.status(403).json({ success: false, message: "Only a workspace Admin can delete projects." });
+    const project = await Project.findOne({ _id: req.params.projectId, workspace: result.workspace._id });
+    if (!project) return res.status(404).json({ success: false, message: "Project not found in this workspace. It may already have been deleted." });
+    if (req.body?.confirmName !== project.name) return res.status(400).json({ success: false, message: "Type the exact project name to confirm deletion." });
+    await deleteProject(result.workspace._id, project);
+    return res.json({ success: true, message: "Project and its discussions, decisions, tasks, uploads, and notifications were permanently deleted." });
+  } catch {
+    return res.status(503).json({ success: false, message: "Project cleanup did not finish. The project remains available; retry deletion or contact an administrator." });
   }
 });
 

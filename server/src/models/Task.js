@@ -19,6 +19,13 @@ const taskCommentSchema = new mongoose.Schema(
   { _id: true }
 );
 
+const acceptanceCriteriaSchema = new mongoose.Schema({
+  text: { type: String, required: true, trim: true, maxlength: 300 },
+  completed: { type: Boolean, default: false },
+  completedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+  completedAt: { type: Date, default: null },
+}, { _id: true });
+
 const pullRequestSchema = new mongoose.Schema({
   url: { type: String, required: true, maxlength: 2048 },
   owner: { type: String, required: true, maxlength: 39 },
@@ -49,6 +56,11 @@ const taskSchema = new mongoose.Schema(
       maxlength: [2000, "Description cannot exceed 2000 characters"],
       default: "",
     },
+    acceptanceCriteria: { type: [acceptanceCriteriaSchema], default: [], validate: { validator: (items) => items.length <= 20, message: "A task can have up to 20 acceptance criteria." } },
+    completedAt: { type: Date, default: null },
+    completedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+    completionMethod: { type: String, enum: ["manual", "github", null], default: null },
+    completionNote: { type: String, trim: true, maxlength: 500, default: "" },
 
     status: {
       type: String,
@@ -110,18 +122,12 @@ const taskSchema = new mongoose.Schema(
       ref: "User",
       required: true,
     },
-    aiSuggestionId: { type: mongoose.Schema.Types.ObjectId, ref: "AISuggestion", default: null },
-    aiSuggestionItemKey: { type: String, default: null, maxlength: 40 },
   },
   {
     timestamps: true,
   }
 );
 
-taskSchema.index({ aiSuggestionId: 1, aiSuggestionItemKey: 1 }, {
-  unique: true,
-  partialFilterExpression: { aiSuggestionId: { $type: "objectId" } },
-});
 taskSchema.index({ "pullRequests.repositoryKey": 1, "pullRequests.number": 1 }, {
   unique: true,
   partialFilterExpression: { "pullRequests.repositoryKey": { $type: "string" } },

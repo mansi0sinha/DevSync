@@ -1,0 +1,87 @@
+warning: in the working copy of 'README.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'client/.env.production.example', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'client/README.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'client/index.html', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'client/package.json', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'client/src/App.jsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'client/src/components/layout/NotificationPanel.jsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'client/src/index.css', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'client/src/pages/Home.jsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'client/src/pages/Login.jsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'client/src/pages/Register.jsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'client/src/pages/Settings.jsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'client/src/services/realtime.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'server/.env.example', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'server/src/config/db.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'server/src/middleware/requestErrorMiddleware.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'server/src/models/Upload.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'server/src/models/WorkspaceInvitation.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'server/src/routes/activityRoutes.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'server/src/routes/decisionRoutes.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'server/src/routes/notificationRoutes.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'server/src/routes/uploadRoutes.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'server/src/services/githubWebhookProcessor.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'server/src/services/projectEvents.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'server/src/services/projectRecords.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'server/src/utils/authValidation.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'server/src/utils/rateLimiter.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'server/src/utils/uploadPolicy.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'server/test/authSecurity.test.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'server/test/uploadSecurity.test.js', LF will be replaced by CRLF the next time Git touches it
+ README.md                                          |  85 [32m+[m[31m--[m
+ client/.env.production.example                     |   3 [32m+[m[31m-[m
+ client/README.md                                   |  20 [32m+[m[31m-[m
+ client/index.html                                  |  11 [32m+[m[31m-[m
+ client/package.json                                |   1 [32m+[m
+ client/public/favicon.svg                          |   1 [31m-[m
+ client/src/App.css                                 | 184 [31m------[m
+ client/src/App.jsx                                 | 143 [32m++++[m[31m-[m
+ client/src/assets/hero.png                         | Bin [31m13057[m -> [32m0[m bytes
+ client/src/assets/react.svg                        |   1 [31m-[m
+ client/src/assets/vite.svg                         |   1 [31m-[m
+ client/src/components/layout/Header.jsx            |   8 [32m+[m[31m-[m
+ client/src/components/layout/NotificationPanel.jsx | 133 [32m+++[m[31m--[m
+ client/src/components/layout/Sidebar.jsx           |  98 [32m++[m[31m--[m
+ client/src/index.css                               | 295 [32m+++++++++[m[31m-[m
+ client/src/pages/AISuggestions.jsx                 | 150 [31m-----[m
+ client/src/pages/Board.jsx                         |  90 [32m+[m[31m--[m
+ client/src/pages/Dashboard.jsx                     |  90 [32m++[m[31m-[m
+ client/src/pages/Decisions.jsx                     |   3 [32m+[m[31m-[m
+ client/src/pages/Discussion.jsx                    |  97 [32m++[m[31m--[m
+ client/src/pages/Home.jsx                          | 414 [32m+++++++++++++[m
+ client/src/pages/Login.jsx                         | 170 [32m++[m[31m----[m
+ client/src/pages/Register.jsx                      | 227 [32m++[m[31m------[m
+ client/src/pages/Settings.jsx                      | 640 [32m+++[m[31m------------------[m
+ client/src/services/api.js                         |  85 [32m++[m[31m-[m
+ client/src/services/realtime.js                    |  22 [32m+[m[31m-[m
+ server/.env.example                                |   5 [32m+[m[31m-[m
+ server/src/config/db.js                            | 128 [32m++++[m[31m-[m
+ server/src/middleware/authMiddleware.js            |   9 [32m+[m
+ server/src/middleware/requestErrorMiddleware.js    |   8 [32m+[m[31m-[m
+ server/src/models/AISuggestion.js                  |  55 [31m--[m
+ server/src/models/Decision.js                      |   6 [31m-[m
+ server/src/models/Task.js                          |  18 [32m+[m[31m-[m
+ server/src/models/Upload.js                        |   3 [32m+[m[31m-[m
+ server/src/models/User.js                          |  12 [32m+[m
+ server/src/models/WorkspaceInvitation.js           |   4 [32m+[m
+ server/src/routes/activityRoutes.js                |   2 [32m+[m[31m-[m
+ server/src/routes/aiSuggestionRoutes.js            | 396 [31m-------------[m
+ server/src/routes/authRoutes.js                    |  87 [32m++[m[31m-[m
+ server/src/routes/decisionRoutes.js                |   8 [32m+[m[31m-[m
+ server/src/routes/discussionRoutes.js              |   2 [32m+[m[31m-[m
+ server/src/routes/notificationRoutes.js            |  98 [32m+++[m[31m-[m
+ server/src/routes/projectRoutes.js                 |  20 [32m+[m
+ server/src/routes/taskRoutes.js                    |  82 [32m++[m[31m-[m
+ server/src/routes/uploadRoutes.js                  |  49 [32m+[m[31m-[m
+ server/src/routes/workspaceRoutes.js               | 119 [32m++[m[31m--[m
+ server/src/server.js                               |  47 [32m+[m[31m-[m
+ server/src/services/githubWebhookProcessor.js      |  56 [32m+[m[31m-[m
+ server/src/services/llmProvider.js                 |  90 [31m---[m
+ server/src/services/projectEvents.js               |  13 [32m+[m[31m-[m
+ server/src/services/projectRecords.js              |   9 [32m+[m[31m-[m
+ server/src/utils/authValidation.js                 |  20 [32m+[m[31m-[m
+ server/src/utils/rateLimiter.js                    |   4 [32m+[m[31m-[m
+ server/src/utils/uploadPolicy.js                   |  40 [32m+[m[31m-[m
+ server/test/authSecurity.test.js                   |  41 [32m+[m[31m-[m
+ server/test/uploadSecurity.test.js                 |  34 [32m+[m[31m-[m
+ 56 files changed, 2171 insertions(+), 2266 deletions(-)

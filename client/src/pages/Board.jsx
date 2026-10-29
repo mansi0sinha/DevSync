@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 
 import Button from "../components/ui/Button";
-import { taskAPI, workspaceAPI } from "../services/api";
+import { getSavedUser, taskAPI, workspaceAPI } from "../services/api";
 import { subscribeRealtime } from "../services/realtime";
 
 const columns = [
@@ -95,6 +95,7 @@ function normalizeTask(task) {
     priority: toDisplayPriority(task.priority),
     assignee: task.assignee || null,
     comments: Array.isArray(task.comments) ? task.comments : [],
+    acceptanceCriteria: Array.isArray(task.acceptanceCriteria) ? task.acceptanceCriteria : [],
     dueDate: toDateInputValue(task.dueDate),
   };
 }
@@ -222,7 +223,7 @@ function TaskCard({
         {task.description || "No description added."}
       </p>
 
-      {task.pullRequests?.length > 0 && <div className="mt-3 space-y-1.5">{task.pullRequests.map((pullRequest) => <a key={pullRequest._id} href={pullRequest.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-xs text-acc hover:underline"><GitPullRequest size={14} /><span>{pullRequest.owner}/{pullRequest.repository} #{pullRequest.number}</span><span className="ml-auto text-[10px] text-muted">{pullRequest.state === "unknown" ? "Awaiting webhook" : pullRequest.state}</span></a>)}</div>}
+      {task.pullRequests?.length > 0 && <div className="mt-3 space-y-1.5">{task.pullRequests.map((pullRequest) => <a key={pullRequest._id} href={pullRequest.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-xs text-acc hover:underline"><GitPullRequest size={14} /><span>{pullRequest.title || `${pullRequest.owner}/${pullRequest.repository} #${pullRequest.number}`}</span><span className="ml-auto text-[10px] text-muted">{pullRequest.state === "unknown" ? "Unverified · waiting for webhook" : pullRequest.state}</span></a>)}</div>}
 
       <div className="mt-4 flex flex-wrap items-center gap-2">
         <span
@@ -267,7 +268,6 @@ function TaskModal({
   members = [],
   membersLoading = false,
   membersError = "",
-  initialStatus = "To do",
   onClose,
   onSave,
 }) {
@@ -277,9 +277,7 @@ function TaskModal({
   const [description, setDescription] = useState(
     task?.description || ""
   );
-  const [status, setStatus] = useState(
-    task?.status || initialStatus
-  );
+  const [criteriaText, setCriteriaText] = useState((task?.acceptanceCriteria || []).map((item) => item.text).join("\n"));
   const [priority, setPriority] = useState(
     task?.priority || "Medium"
   );
@@ -302,10 +300,14 @@ function TaskModal({
     const payload = {
       title: title.trim(),
       description: description.trim(),
-      status: toApiStatus(status),
+      ...(isEditing ? {} : { status: "todo" }),
       priority: priority.toLowerCase(),
       dueDate: dueDate || null,
       assignee: assignee || null,
+      acceptanceCriteria: criteriaText.split("\n").map((text) => text.trim()).filter(Boolean).map((text) => {
+        const existing = task?.acceptanceCriteria?.find((item) => item.text === text);
+        return existing ? { _id: existing._id, text, completed: existing.completed } : { text, completed: false };
+      }),
     };
 
     try {
@@ -398,29 +400,10 @@ function TaskModal({
           className="mb-4 w-full resize-y rounded-lg border border-line bg-bg px-3 py-2.5 text-sm text-text outline-none placeholder:text-muted focus:border-acc"
         />
 
+        <label htmlFor="task-acceptance-criteria" className="mb-1.5 block text-sm font-medium text-text">Acceptance criteria <span className="font-normal text-muted">(one per line)</span></label>
+        <textarea id="task-acceptance-criteria" maxLength={6000} value={criteriaText} onChange={(event) => setCriteriaText(event.target.value)} placeholder="Each item should be verifiable" rows={3} className="mb-4 w-full resize-y rounded-lg border border-line bg-bg px-3 py-2.5 text-sm text-text outline-none placeholder:text-muted focus:border-acc" />
+
         <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div>
-            <label
-              htmlFor="task-status"
-              className="mb-1.5 block text-sm font-medium text-text"
-            >
-              Status
-            </label>
-
-            <select
-              id="task-status"
-              value={status}
-              onChange={(event) => setStatus(event.target.value)}
-              className="w-full rounded-lg border border-line bg-bg px-3 py-2.5 text-sm text-text outline-none focus:border-acc"
-            >
-              {columns.map((column) => (
-                <option key={column.id} value={column.id}>
-                  {column.title}
-                </option>
-              ))}
-            </select>
-          </div>
-
           <div>
             <label
               htmlFor="task-priority"
@@ -556,18 +539,31 @@ function TaskCommentsDialog({ task, onClose, onAddComment }) {
   );
 }
 
-function TaskContextDialog({ task, context, loading, error, onClose, onOpenDecision, onOpenDiscussion, onAddPullRequest, onUpdatePullRequest, onRemovePullRequest }) {
+function TaskContextDialog({ task, context, loading, error, onClose, onOpenDecision, onOpenDiscussion, onAddPullRequest, onUpdatePullRequest, onRemovePullRequest, onUpdateTask, onCompleteTask, canManuallyComplete }) {
   const [pullRequestUrl, setPullRequestUrl] = useState("");
   const [editingPullRequest, setEditingPullRequest] = useState(null);
   const [pullRequestError, setPullRequestError] = useState("");
   const [pullRequestBusy, setPullRequestBusy] = useState(false);
+  const [pullRequestSuccess, setPullRequestSuccess] = useState("");
+  const [completionNote, setCompletionNote] = useState("");
+  const [taskActionBusy, setTaskActionBusy] = useState(false);
+  const currentUserId = String(getSavedUser()?._id || getSavedUser()?.id || "");
+  const isAssignee = String(task.assignee?._id || task.assignee || "") === currentUserId;
   async function savePullRequest(event) {
     event.preventDefault();
+    if (pullRequestBusy) return;
     setPullRequestError("");
+    let parsedUrl;
+    try { parsedUrl = new URL(pullRequestUrl.trim()); } catch { parsedUrl = null; }
+    if (!parsedUrl || parsedUrl.protocol !== "https:" || parsedUrl.hostname !== "github.com" || parsedUrl.username || parsedUrl.password || parsedUrl.port || parsedUrl.search || parsedUrl.hash || !/^\/[^/]+\/[^/]+\/pull\/[1-9]\d*$/.test(parsedUrl.pathname)) {
+      setPullRequestError("Enter a valid HTTPS GitHub pull request URL, such as https://github.com/owner/repo/pull/123.");
+      return;
+    }
     setPullRequestBusy(true);
     try {
-      if (editingPullRequest) await onUpdatePullRequest(editingPullRequest._id, pullRequestUrl);
-      else await onAddPullRequest(pullRequestUrl);
+      if (editingPullRequest) await onUpdatePullRequest(editingPullRequest._id, parsedUrl.href);
+      else await onAddPullRequest(parsedUrl.href);
+      setPullRequestSuccess("Pull request link saved. Lifecycle status will update only from verified GitHub webhooks.");
       setEditingPullRequest(null);
       setPullRequestUrl("");
     } catch (saveError) {
@@ -587,9 +583,18 @@ function TaskContextDialog({ task, context, loading, error, onClose, onOpenDecis
           <button type="button" aria-label="Close task context" onClick={onClose} className="rounded-md p-2 text-muted hover:bg-hover"><X size={18} /></button>
         </div>
         <div className="mt-5 space-y-5">
+          <section className="rounded-lg border border-line p-4">
+            <h3 className="text-sm font-semibold text-text">Task details</h3>
+            <p className="mt-2 whitespace-pre-wrap text-sm text-muted">{task.description || "No description provided."}</p>
+            <dl className="mt-3 grid grid-cols-2 gap-2 text-xs"><div><dt className="text-muted">Status</dt><dd className="font-medium text-text">{task.status}</dd></div><div><dt className="text-muted">Priority</dt><dd className="font-medium text-text">{task.priority}</dd></div><div><dt className="text-muted">Assignee</dt><dd className="font-medium text-text">{typeof task.assignee === "object" ? task.assignee?.name || task.assignee?.email : "Unassigned"}</dd></div><div><dt className="text-muted">Created by</dt><dd className="font-medium text-text">{task.createdBy?.name || task.createdBy?.email || "Workspace member"}</dd></div><div><dt className="text-muted">Due date</dt><dd className="font-medium text-text">{task.dueDate ? new Date(task.dueDate).toLocaleDateString() : "No deadline"}</dd></div><div><dt className="text-muted">Pull requests</dt><dd className="font-medium text-text">{task.pullRequests?.length || 0} linked</dd></div></dl>
+            {isAssignee && task.status !== "Done" && <div className="mt-4 flex flex-wrap items-center gap-2"><p className="mr-auto text-xs text-muted">{task.status === "To do" ? "Next: start work on this task." : task.status === "In progress" ? "Next: submit your work for review." : "Next: return to work if changes were requested."}</p>{task.status === "To do" && <Button size="sm" disabled={taskActionBusy} onClick={async () => { setTaskActionBusy(true); try { await onUpdateTask({ status: "in-progress" }); } catch (cause) { setPullRequestError(cause.message || "Could not start this task."); } finally { setTaskActionBusy(false); } }}>Start work</Button>}{task.status === "In progress" && <Button size="sm" disabled={taskActionBusy} onClick={async () => { setTaskActionBusy(true); try { await onUpdateTask({ status: "in-review" }); } catch (cause) { setPullRequestError(cause.message || "Could not submit this task for review."); } finally { setTaskActionBusy(false); } }}>Submit for review</Button>}{task.status === "In review" && <Button size="sm" variant="secondary" disabled={taskActionBusy} onClick={async () => { setTaskActionBusy(true); try { await onUpdateTask({ status: "in-progress" }); } catch (cause) { setPullRequestError(cause.message || "Could not return this task to work."); } finally { setTaskActionBusy(false); } }}>Return to work</Button>}</div>}
+            {task.acceptanceCriteria?.length > 0 && <div className="mt-4"><h4 className="text-xs font-semibold text-text">Acceptance criteria</h4><ul className="mt-2 space-y-2">{task.acceptanceCriteria.map((criterion) => <li key={criterion._id} className="flex items-start gap-2 text-sm"><input type="checkbox" checked={Boolean(criterion.completed)} disabled={taskActionBusy || criterion.completed || task.status === "done"} aria-label={`Complete acceptance criterion: ${criterion.text}`} onChange={async () => { setTaskActionBusy(true); try { await onUpdateTask({ acceptanceCriteria: task.acceptanceCriteria.map((item) => ({ _id: item._id, text: item.text, completed: item._id === criterion._id || item.completed })) }); } catch (cause) { setPullRequestError(cause.message || "Could not update acceptance criteria."); } finally { setTaskActionBusy(false); } }} className="mt-0.5 accent-teal-600"/><span className={criterion.completed ? "text-muted line-through" : "text-text"}>{criterion.text}</span></li>)}</ul></div>}
+            {task.status === "in-review" && canManuallyComplete && <form className="mt-4 space-y-2 border-t border-line pt-3" onSubmit={async (event) => { event.preventDefault(); if (!completionNote.trim() || taskActionBusy) return; setTaskActionBusy(true); try { await onCompleteTask(completionNote.trim()); setCompletionNote(""); } catch (cause) { setPullRequestError(cause.message || "Could not complete this task."); } finally { setTaskActionBusy(false); } }}><label htmlFor="task-completion-note" className="block text-xs font-medium text-text">Authorized manual completion</label><input id="task-completion-note" value={completionNote} onChange={(event) => setCompletionNote(event.target.value)} maxLength={500} required placeholder="Why is this task complete?" className="h-9 w-full rounded-md border border-line bg-surface px-3 text-sm text-text"/><Button type="submit" disabled={taskActionBusy}>{taskActionBusy ? "Completing…" : "Complete task"}</Button></form>}
+            {task.completionMethod && <p className="mt-3 text-xs text-muted">Completed by {task.completedBy?.name || "a workspace admin"} via {task.completionMethod === "github" ? "merged pull request" : "manual confirmation"}{task.completionNote ? ` · ${task.completionNote}` : ""}</p>}
+          </section>
           <section className="rounded-lg border border-line p-4"><h3 className="text-sm font-semibold text-text">GitHub pull requests</h3><p className="mt-1 text-xs text-muted">Lifecycle state is updated only from verified GitHub webhooks.</p>
             {task.pullRequests?.map((pullRequest) => <div key={pullRequest._id} className="mt-3 flex flex-wrap items-center gap-2 rounded-md bg-hover p-3"><GitPullRequest size={15} className="text-acc" /><a href={pullRequest.url} target="_blank" rel="noopener noreferrer" className="min-w-0 flex-1 break-all text-sm text-acc hover:underline">{pullRequest.owner}/{pullRequest.repository} #{pullRequest.number}</a><span className="text-xs text-muted">{pullRequest.state === "unknown" ? "Awaiting webhook" : pullRequest.state}{pullRequest.draft ? " · draft" : ""}</span><button type="button" className="text-xs text-muted hover:text-text" onClick={() => { setEditingPullRequest(pullRequest); setPullRequestUrl(pullRequest.url); setPullRequestError(""); }}>Edit</button><button type="button" disabled={pullRequestBusy} className="text-xs text-red-500 disabled:opacity-50" onClick={async () => { setPullRequestError(""); setPullRequestBusy(true); try { await onRemovePullRequest(pullRequest._id); } catch (removeError) { setPullRequestError(removeError.message || "Could not remove this link."); } finally { setPullRequestBusy(false); } }}>Remove</button></div>)}
-            <form onSubmit={savePullRequest} className="mt-3 space-y-2"><label htmlFor="github-pr-url" className="block text-xs font-medium text-text">{editingPullRequest ? "Update pull request URL" : "Add pull request URL"}</label><div className="flex flex-col gap-2 sm:flex-row"><input id="github-pr-url" type="url" value={pullRequestUrl} onChange={(event) => setPullRequestUrl(event.target.value)} placeholder="https://github.com/owner/repo/pull/123" className="h-10 min-w-0 flex-1 rounded-lg border border-line bg-surface px-3 text-sm text-text outline-none focus:border-acc" required /><Button type="submit" disabled={pullRequestBusy}>{pullRequestBusy ? "Saving..." : editingPullRequest ? "Update link" : "Add link"}</Button>{editingPullRequest && <Button type="button" variant="secondary" disabled={pullRequestBusy} onClick={() => { setEditingPullRequest(null); setPullRequestUrl(""); }}>Cancel</Button>}</div><p className="text-xs text-muted">Status cannot be set here. DevSync updates it from signed GitHub webhook events.</p>{pullRequestError && <p role="alert" className="text-sm text-red-500">{pullRequestError}</p>}</form>
+            <form onSubmit={savePullRequest} className="mt-3 space-y-2"><label htmlFor="github-pr-url" className="block text-xs font-medium text-text">{editingPullRequest ? "Update pull request URL" : "Add pull request URL"}</label><div className="flex flex-col gap-2 sm:flex-row"><input id="github-pr-url" type="url" value={pullRequestUrl} onChange={(event) => { setPullRequestUrl(event.target.value); setPullRequestError(""); }} placeholder="https://github.com/owner/repo/pull/123" aria-invalid={Boolean(pullRequestError)} aria-describedby={pullRequestError ? "github-pr-url-error" : undefined} className="h-10 min-w-0 flex-1 rounded-lg border border-line bg-surface px-3 text-sm text-text outline-none focus:border-acc" required /><Button type="submit" disabled={pullRequestBusy}>{pullRequestBusy ? "Saving..." : editingPullRequest ? "Update link" : "Add link"}</Button>{editingPullRequest && <Button type="button" variant="secondary" disabled={pullRequestBusy} onClick={() => { setEditingPullRequest(null); setPullRequestUrl(""); setPullRequestError(""); }}>Cancel</Button>}</div><p className="text-xs text-muted">Status cannot be set here. DevSync updates it from signed GitHub webhook events.</p>{pullRequestSuccess && <p role="status" className="text-sm text-teal-600">{pullRequestSuccess}</p>}{pullRequestError && <p id="github-pr-url-error" role="alert" className="text-sm text-red-500">{pullRequestError}</p>}</form>
           </section>
         {loading ? <p role="status" className="py-4 text-center text-sm text-muted">Loading linked context...</p> : error ? <p role="alert" className="rounded-lg border border-red-500/30 p-3 text-sm text-red-500">{error}</p> : !context || (!context.decisions?.length && !context.discussions?.length) ? <p className="rounded-lg border border-dashed border-line p-6 text-center text-sm text-muted">No decisions or source discussions are linked to this task yet.</p> : (
           <div className="mt-5 space-y-5">
@@ -834,6 +839,23 @@ export default function Board({ workspaceId, projectId, workspace, project, onOp
     return updatedTask;
   }
 
+  async function updateTaskContext(taskId, updates) {
+    const response = await taskAPI.update(taskId, updates, workspaceId, projectId);
+    const updated = normalizeTask(response.data);
+    setTasks((current) => upsertTask(current, updated));
+    setContextTask(updated);
+    return updated;
+  }
+
+  async function completeTask(taskId, note) {
+    const response = await taskAPI.complete(taskId, note, workspaceId, projectId);
+    const updated = normalizeTask(response.data);
+    setTasks((current) => upsertTask(current, updated));
+    setContextTask(updated);
+    setSuccessMessage("Task completed.");
+    return updated;
+  }
+
   function handleDragStart(event, taskId) {
     event.dataTransfer.effectAllowed = "move";
     event.dataTransfer.setData("text/plain", taskId);
@@ -1072,7 +1094,7 @@ export default function Board({ workspaceId, projectId, workspace, project, onOp
       )}
 
       {commentingTask && <TaskCommentsDialog task={commentingTask} onClose={() => setCommentingTask(null)} onAddComment={addComment} />}
-      {contextTask && <TaskContextDialog task={contextTask} context={taskContext} loading={contextLoading} error={contextError} onClose={() => setContextTask(null)} onOpenDecision={(id) => { setContextTask(null); onOpenDecision(id); }} onOpenDiscussion={(id, messageId) => { setContextTask(null); onOpenDiscussion(id, messageId); }} onAddPullRequest={(url) => savePullRequestLink(contextTask.id, () => taskAPI.addPullRequest(contextTask.id, url, workspaceId, projectId))} onUpdatePullRequest={(prId, url) => savePullRequestLink(contextTask.id, () => taskAPI.updatePullRequest(contextTask.id, prId, url, workspaceId, projectId))} onRemovePullRequest={(prId) => savePullRequestLink(contextTask.id, () => taskAPI.removePullRequest(contextTask.id, prId, workspaceId, projectId))} />}
+      {contextTask && <TaskContextDialog task={contextTask} context={taskContext} loading={contextLoading} error={contextError} canManuallyComplete={String(workspace?.createdBy || "") === String(getSavedUser()?._id || getSavedUser()?.id || "") || members.some((member) => String(member.user?._id || member.user) === String(getSavedUser()?._id || getSavedUser()?.id || "") && member.role === "Admin")} onUpdateTask={(updates) => updateTaskContext(contextTask.id, updates)} onCompleteTask={(note) => completeTask(contextTask.id, note)} onClose={() => setContextTask(null)} onOpenDecision={(id) => { setContextTask(null); onOpenDecision(id); }} onOpenDiscussion={(id, messageId) => { setContextTask(null); onOpenDiscussion(id, messageId); }} onAddPullRequest={(url) => savePullRequestLink(contextTask.id, () => taskAPI.addPullRequest(contextTask.id, url, workspaceId, projectId))} onUpdatePullRequest={(prId, url) => savePullRequestLink(contextTask.id, () => taskAPI.updatePullRequest(contextTask.id, prId, url, workspaceId, projectId))} onRemovePullRequest={(prId) => savePullRequestLink(contextTask.id, () => taskAPI.removePullRequest(contextTask.id, prId, workspaceId, projectId))} />}
     </div>
   );
 }

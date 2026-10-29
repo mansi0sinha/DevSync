@@ -6,6 +6,9 @@ const User = require("../models/User");
 const authMiddleware = require("../middleware/authMiddleware");
 const mongoose = require("mongoose");
 const crypto = require("crypto");
+const { deleteWorkspace } = require("../services/resourceDeletion");
+const { canAdministerWorkspace } = require("../utils/workspacePermissions");
+const { acceptInvitation } = require("../services/invitationAcceptance");
 
 const router = express.Router();
 
@@ -23,43 +26,19 @@ router.post("/invitations/accept", authMiddleware, async (req, res) => {
       return res.status(400).json({ success: false, message: "Invitation token is invalid or expired." });
     }
 
-    const now = new Date();
-    const invitation = await WorkspaceInvitation.findOne({
+    const result = await acceptInvitation({ Workspace, WorkspaceInvitation }, {
       tokenHash: hashInvitationToken(token),
       email: normalizeEmail(req.user.email),
-      acceptedAt: null,
-      expiresAt: { $gt: now },
-    }).select("workspace email");
-
-    if (!invitation) {
+      userId: req.user._id,
+    });
+    if (result.status === "invalid" || result.status === "expired" || result.status === "used") {
       return res.status(404).json({ success: false, message: "Invitation is invalid, expired, already used, or addressed to another account." });
     }
-
-    const workspace = await Workspace.findOneAndUpdate(
-      {
-        _id: invitation.workspace,
-        members: { $not: { $elemMatch: { user: req.user._id } } },
-      },
-      { $push: { members: { user: req.user._id, role: "Member" } } },
-      { new: true, runValidators: true }
-    );
-
-    if (!workspace) {
-      const alreadyMember = await Workspace.exists({ _id: invitation.workspace, "members.user": req.user._id });
-      return res.status(alreadyMember ? 409 : 404).json({
-        success: false,
-        message: alreadyMember ? "You are already a workspace member." : "Workspace no longer exists.",
-      });
-    }
-
-    await WorkspaceInvitation.updateOne(
-      { _id: invitation._id, acceptedAt: null, expiresAt: { $gt: now } },
-      { $set: { acceptedAt: now, acceptedBy: req.user._id } }
-    );
-
-    return res.status(200).json({ success: true, message: "Workspace joined successfully.", workspace });
+    if (result.status === "claimed") return res.status(409).json({ success: false, message: "This invitation is currently being accepted. Please retry shortly." });
+    if (result.status === "workspace-missing") return res.status(404).json({ success: false, message: "Workspace no longer exists." });
+    return res.status(200).json({ success: true, message: result.status === "already-member" ? "You are already a workspace member." : "Workspace joined successfully.", workspace: result.workspace });
   } catch (error) {
-    console.error("Workspace invitation acceptance failed:", error.message);
+    console.error("Workspace invitation acceptance failed.", { name: error.name, code: error.code || "unknown" });
     return res.status(500).json({ success: false, message: "Could not accept the invitation." });
   }
 });
@@ -104,7 +83,7 @@ router.post("/:workspaceId/invitations", authMiddleware, async (req, res) => {
 
     return res.status(201).json({ success: true, message: "Invitation created. Share this token with the invited account.", token, expiresAt });
   } catch (error) {
-    console.error("Workspace invitation creation failed:", error.message);
+    console.error("Workspace invitation creation failed.", { name: error.name, code: error.code || "unknown" });
     return res.status(500).json({ success: false, message: "Could not create the invitation." });
   }
 });
@@ -145,7 +124,7 @@ router.post("/", authMiddleware, async (req, res) => {
       workspace,
     });
   } catch (error) {
-    console.error("Workspace creation error:", error.message);
+    console.error("Workspace creation failed.", { name: error.name, code: error.code || "unknown" });
 
     return res.status(500).json({
       success: false,
@@ -169,7 +148,7 @@ router.get("/", authMiddleware, async (req, res) => {
       workspaces,
     });
   } catch (error) {
-    console.error("Workspace listing error:", error.message);
+    console.error("Workspace listing failed.", { name: error.name, code: error.code || "unknown" });
 
     return res.status(500).json({
       success: false,
@@ -215,11 +194,55 @@ router.get("/:workspaceId", authMiddleware, async (req, res) => {
       workspace,
     });
   } catch (error) {
-    console.error("Workspace details error:", error.message);
+    console.error("Workspace details lookup failed.", { name: error.name, code: error.code || "unknown" });
     return res.status(500).json({
       success: false,
       message: "Server error while fetching workspace details.",
     });
+  }
+});
+
+router.get("/:workspaceId/member-management", authMiddleware, async (req, res) => {
+  try {
+    if (!mongoose.isObjectIdOrHexString(req.params.workspaceId)) return res.status(400).json({ success: false, message: "Invalid workspace ID." });
+    const workspace = await Workspace.findById(req.params.workspaceId).populate("members.user", "name email username avatar");
+    if (!workspace) return res.status(404).json({ success: false, message: "Workspace not found." });
+    const member = workspace.members.find((entry) => String(entry.user?._id) === String(req.user._id));
+    if (!member) return res.status(404).json({ success: false, message: "Workspace not found or access denied." });
+    const invitations = member.role === "Admin" ? await WorkspaceInvitation.find({ workspace: workspace._id, acceptedAt: null, revokedAt: null, expiresAt: { $gt: new Date() } }).select("email expiresAt createdAt invitedBy").populate("invitedBy", "name email").sort({ createdAt: -1 }).limit(50).lean() : [];
+    return res.json({ success: true, members: workspace.members, pendingInvitations: invitations });
+  } catch {
+    return res.status(500).json({ success: false, message: "Could not load workspace members." });
+  }
+});
+
+router.post("/:workspaceId/invitations/:invitationId/revoke", authMiddleware, async (req, res) => {
+  try {
+    const { workspaceId, invitationId } = req.params;
+    if (!mongoose.isObjectIdOrHexString(workspaceId) || !mongoose.isObjectIdOrHexString(invitationId)) return res.status(400).json({ success: false, message: "Invalid workspace or invitation ID." });
+    const workspace = await Workspace.findOne({ _id: workspaceId, "members.user": req.user._id });
+    if (!workspace) return res.status(404).json({ success: false, message: "Workspace not found or access denied." });
+    if (!canAdministerWorkspace(workspace, req.user._id)) return res.status(403).json({ success: false, message: "Only workspace Admins can revoke invitations." });
+    const now = new Date();
+    const result = await WorkspaceInvitation.updateOne({ _id: invitationId, workspace: workspace._id, acceptedAt: null, revokedAt: null, $or: [{ acceptanceClaim: null }, { acceptanceClaimExpiresAt: { $lte: now } }] }, { $set: { revokedAt: now, revokedBy: req.user._id, acceptanceClaim: null, acceptanceClaimExpiresAt: null } });
+    if (!result.modifiedCount) return res.status(409).json({ success: false, message: "Invitation is no longer pending or is being accepted." });
+    return res.json({ success: true, message: "Invitation revoked." });
+  } catch { return res.status(500).json({ success: false, message: "Could not revoke the invitation." }); }
+});
+
+router.delete("/:workspaceId", authMiddleware, async (req, res) => {
+  try {
+    if (!mongoose.isObjectIdOrHexString(req.params.workspaceId)) return res.status(400).json({ success: false, message: "Invalid workspace ID." });
+    const workspace = await Workspace.findById(req.params.workspaceId);
+    if (!workspace) return res.status(404).json({ success: false, message: "Workspace not found. It may already have been deleted." });
+    const membership = workspace.members.find((member) => String(member.user) === String(req.user._id));
+    if (!membership) return res.status(403).json({ success: false, message: "You are not authorized to delete this workspace." });
+    if (!canAdministerWorkspace(workspace, req.user._id)) return res.status(403).json({ success: false, message: "Only a workspace Admin can delete this workspace." });
+    if (req.body?.confirmName !== workspace.name) return res.status(400).json({ success: false, message: "Type the exact workspace name to confirm deletion." });
+    await deleteWorkspace(workspace);
+    return res.json({ success: true, message: "Workspace and its projects, discussions, decisions, tasks, uploads, and notifications were permanently deleted." });
+  } catch {
+    return res.status(503).json({ success: false, message: "Workspace cleanup did not finish. The workspace remains available; retry deletion or contact an administrator." });
   }
 });
 
@@ -318,7 +341,7 @@ router.post("/:workspaceId/members", authMiddleware, async (req, res) => {
       expiresAt,
     });
   } catch (error) {
-    console.error("Add workspace member error:", error.message);
+    console.error("Workspace member invitation failed.", { name: error.name, code: error.code || "unknown" });
 
     return res.status(500).json({
       success: false,
@@ -407,16 +430,30 @@ router.patch("/:workspaceId/members/:userId/role", authMiddleware, async (req, r
       });
     }
 
-    targetMembership.role = role;
-    await workspace.save();
+    const conditions = [
+      { _id: workspaceId },
+      { members: { $elemMatch: { user: req.user._id, role: "Admin" } } },
+      { members: { $elemMatch: { user: userId, role: targetMembership.role } } },
+    ];
+    if (targetMembership.role === "Admin" && role === "Member") {
+      // Re-check inside the atomic write so simultaneous Admin demotions cannot
+      // leave an active workspace without an administrator.
+      conditions.push({ members: { $elemMatch: { user: { $ne: userId }, role: "Admin" } } });
+    }
+    const updatedWorkspace = await Workspace.findOneAndUpdate(
+      { $and: conditions },
+      { $set: { "members.$[target].role": role } },
+      { arrayFilters: [{ "target.user": userId }], returnDocument: "after", runValidators: true }
+    );
+    if (!updatedWorkspace) return res.status(409).json({ success: false, message: "Workspace roles changed concurrently. Refresh and try again; at least one Admin must remain." });
 
     return res.status(200).json({
       success: true,
       message: `Member role updated to ${role}.`,
-      workspace,
+      workspace: updatedWorkspace,
     });
   } catch (error) {
-    console.error("Update workspace role error:", error.message);
+    console.error("Workspace role update failed.", { name: error.name, code: error.code || "unknown" });
     return res.status(500).json({
       success: false,
       message: "Server error while updating member role.",

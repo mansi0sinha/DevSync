@@ -1,10 +1,11 @@
 const Task = require("../models/Task");
 const Decision = require("../models/Decision");
 
-function createTaskRecord({ scope, actorId, fields, aiSuggestionId = null, aiSuggestionItemKey = null }) {
+function createTaskRecord({ scope, actorId, fields }) {
   return Task.create({
     title: fields.title,
     description: fields.description || "",
+    acceptanceCriteria: (fields.acceptanceCriteria || []).map((item) => ({ text: item.text.trim(), completed: false })),
     status: fields.status || "todo",
     priority: fields.priority || "medium",
     dueDate: fields.dueDate || null,
@@ -12,12 +13,10 @@ function createTaskRecord({ scope, actorId, fields, aiSuggestionId = null, aiSug
     workspace: scope.workspace._id,
     project: scope.project._id,
     createdBy: actorId,
-    aiSuggestionId,
-    aiSuggestionItemKey,
   });
 }
 
-function createDecisionRecord({ scope, actorName, fields, task = null, discussion = null, discussionMessageId = null, aiSuggestionId = null, aiSuggestionItemKey = null }) {
+function createDecisionRecord({ scope, actorName, fields, task = null, discussion = null, discussionMessageId = null }) {
   return Decision.create({
     title: fields.title,
     summary: fields.summary,
@@ -30,8 +29,6 @@ function createDecisionRecord({ scope, actorName, fields, task = null, discussio
     discussionId: discussion?._id || null,
     discussionMessageId: discussionMessageId || null,
     createdBy: actorName || "Unknown",
-    aiSuggestionId,
-    aiSuggestionItemKey,
   });
 }
 

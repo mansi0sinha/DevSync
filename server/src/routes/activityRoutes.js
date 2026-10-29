@@ -34,7 +34,7 @@ router.get("/", async (req, res) => {
     const idsByType = Object.fromEntries(["task", "decision", "discussion"].map((type) => [type, rows.filter((row) => row.entityType === type).map((row) => row.entityId)]));
     const [tasks, decisions, discussions] = await Promise.all([
       Task.find({ _id: { $in: idsByType.task }, workspace: workspace._id, project: project._id }).select("_id"),
-      Decision.find({ _id: { $in: idsByType.decision }, workspace: workspace._id, projectRef: project._id }).select("_id"),
+      Decision.find({ _id: { $in: idsByType.decision }, workspace: workspace._id, projectRef: project._id, deletedAt: null }).select("_id"),
       Discussion.find({ _id: { $in: idsByType.discussion }, workspace: workspace._id, project: project._id }).select("_id"),
     ]);
     const available = new Set([...tasks, ...decisions, ...discussions].map((item) => String(item._id)));

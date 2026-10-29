@@ -1,5 +1,5 @@
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import Sidebar from "./components/layout/Sidebar";
 import Header from "./components/layout/Header";
@@ -11,7 +11,7 @@ import Decisions from "./pages/Decisions";
 import Settings from "./pages/Settings";
 import Activity from "./pages/Activity";
 import Search from "./pages/Search";
-import AISuggestions from "./pages/AISuggestions";
+import Home from "./pages/Home";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import { WorkspaceDialog, WorkspaceOnboarding } from "./components/workspaces/WorkspaceDialogs";
@@ -23,9 +23,11 @@ import {
   clearSession,
   getSavedUser,
   getToken,
+  saveSession,
   workspaceAPI,
   projectAPI,
 } from "./services/api";
+import { getNotificationDestination } from "./services/notificationNavigation";
 
 const protectedPages = [
   "dashboard",
@@ -35,15 +37,14 @@ const protectedPages = [
   "settings",
   "activity",
   "search",
-  "ai-suggestions",
 ];
 
-const publicPages = ["login", "register"];
-const validPages = [...protectedPages, ...publicPages];
+const publicPages = ["home", "login", "register"];
+const validPages = [...protectedPages, ...publicPages, "not-found"];
 
 function getPageFromURL() {
   const page = window.location.pathname.replace(/^\/+|\/+$/g, "");
-  return validPages.includes(page) ? page : "dashboard";
+  return page === "" ? "home" : validPages.includes(page) ? page : "not-found";
 }
 
 function getList(result, key) {
@@ -75,6 +76,22 @@ function App() {
   const [dialogType, setDialogType] = useState("");
   const [workspaceLoadAttempt, setWorkspaceLoadAttempt] = useState(0);
   const [projectLoadAttempt, setProjectLoadAttempt] = useState(0);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const mobileNavToggleRef = useRef(null);
+
+  const closeMobileNavigation = useCallback(() => {
+    setMobileNavOpen(false);
+    window.requestAnimationFrame(() => mobileNavToggleRef.current?.focus());
+  }, []);
+
+  useEffect(() => {
+    if (!mobileNavOpen) return undefined;
+    function closeOnEscape(event) {
+      if (event.key === "Escape") closeMobileNavigation();
+    }
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [mobileNavOpen, closeMobileNavigation]);
 
   useEffect(() => {
     if (!user || !workspaceId || !projectId || !getToken()) {
@@ -87,11 +104,12 @@ function App() {
   const navigate = useCallback((page, options = {}) => {
     if (!validPages.includes(page)) return;
 
-    if (window.location.pathname !== `/${page}`) {
+    const target = page === "home" ? "/" : `/${page}`;
+    if (window.location.pathname !== target) {
       if (options.replace) {
-        window.history.replaceState({}, "", `/${page}`);
+        window.history.replaceState({}, "", target);
       } else {
-        window.history.pushState({}, "", `/${page}`);
+        window.history.pushState({}, "", target);
       }
     }
 
@@ -109,7 +127,7 @@ function App() {
     localStorage.removeItem("devsync_workspace_id");
     Object.keys(localStorage).filter((key) => key.startsWith("devsync_project_"))
       .forEach((key) => localStorage.removeItem(key));
-    navigate("login", { replace: true });
+    navigate("home", { replace: true });
   }, [navigate]);
 
   // Verify the saved session with the backend.
@@ -155,6 +173,11 @@ function App() {
   useEffect(() => {
     function handlePopState() {
       setActivePage(getPageFromURL());
+      const params = new URLSearchParams(window.location.search);
+      const nextWorkspace = params.get("workspace");
+      const nextProject = params.get("project");
+      if (nextWorkspace) setWorkspaceId(nextWorkspace);
+      if (nextProject) setProjectId(nextProject);
     }
 
     function handleSessionExpired() {
@@ -187,6 +210,8 @@ function App() {
     if (checkingSession) return;
 
     if (!user && protectedPages.includes(activePage)) {
+      // A redirect is the route guard's required state transition.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       navigate("login", { replace: true });
     } else if (user && publicPages.includes(activePage)) {
       navigate("dashboard", { replace: true });
@@ -222,7 +247,8 @@ function App() {
         }
 
         setWorkspaceId((currentId) => {
-          const requestedId = currentId || savedWorkspaceId;
+          const urlWorkspaceId = new URLSearchParams(window.location.search).get("workspace");
+          const requestedId = currentId || urlWorkspaceId || savedWorkspaceId;
           return list.some((item) => getItemId(item) === requestedId)
             ? requestedId
             : getItemId(list[0]);
@@ -248,7 +274,7 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, [user?._id, user?.id, user?.email, workspaceLoadAttempt]);
+  }, [user, user?._id, user?.id, user?.email, workspaceLoadAttempt]);
 
   useEffect(() => {
     if (workspaceId) localStorage.setItem("devsync_workspace_id", workspaceId);
@@ -278,7 +304,8 @@ function App() {
         if (cancelled) return;
 
         setProjects(list);
-        const savedId = localStorage.getItem(`devsync_project_${workspaceId}`);
+        const urlProjectId = new URLSearchParams(window.location.search).get("project");
+        const savedId = urlProjectId || localStorage.getItem(`devsync_project_${workspaceId}`);
         const validSavedId = list.some((item) => getItemId(item) === savedId);
         if (savedId && !validSavedId) localStorage.removeItem(`devsync_project_${workspaceId}`);
         setProjectId(validSavedId ? savedId : getItemId(list[0]));
@@ -303,6 +330,16 @@ function App() {
   useEffect(() => {
     if (workspaceId && projectId) localStorage.setItem(`devsync_project_${workspaceId}`, projectId);
   }, [workspaceId, projectId]);
+
+  useEffect(() => {
+    if (!user || checkingSession || loadingWorkspaces) return;
+    const params = new URLSearchParams(window.location.search);
+    if (workspaceId) params.set("workspace", workspaceId); else params.delete("workspace");
+    if (projectId) params.set("project", projectId); else params.delete("project");
+    const query = params.toString();
+    const nextUrl = `${window.location.pathname}${query ? `?${query}` : ""}`;
+    if (`${window.location.pathname}${window.location.search}` !== nextUrl) window.history.replaceState({}, "", nextUrl);
+  }, [workspaceId, projectId, user, checkingSession, loadingWorkspaces]);
 
   function handleLogin(loggedInUser) {
     setUser(loggedInUser || getSavedUser());
@@ -353,6 +390,17 @@ function App() {
     return workspaceAPI.createInvitation(workspaceId, email);
   }
 
+  async function handleMemberRoleChange(userId, role) {
+    const result = await workspaceAPI.updateMemberRole(workspaceId, userId, role);
+    const updated = result.workspace || result.data?.workspace;
+    if (updated) setWorkspaces((current) => current.map((item) => getItemId(item) === workspaceId ? updated : item));
+    else {
+      const refreshed = await workspaceAPI.getById(workspaceId);
+      const workspace = refreshed.workspace || refreshed.data?.workspace;
+      if (workspace) setWorkspaces((current) => current.map((item) => getItemId(item) === workspaceId ? workspace : item));
+    }
+  }
+
   function openDecisionContext(decisionId) {
     if (decisionId) sessionStorage.setItem("devsync_decision_focus", decisionId);
     navigate("decisions");
@@ -369,10 +417,50 @@ function App() {
     navigate("board");
   }
 
+  async function openNotification(item) {
+    const destination = getNotificationDestination(item);
+    if (!destination) throw new Error("This notification does not have a supported destination.");
+    const targetWorkspace = workspaces.find((workspace) => getItemId(workspace) === destination.workspaceId);
+    if (!targetWorkspace) throw new Error("This workspace is no longer available to your account.");
+    const result = await projectAPI.getAll(destination.workspaceId);
+    const targetProjects = getList(result, "projects");
+    if (!targetProjects.some((project) => getItemId(project) === destination.projectId)) throw new Error("This project is no longer available to your account.");
+    setWorkspaceId(destination.workspaceId);
+    setProjects(targetProjects);
+    setProjectId(destination.projectId);
+    sessionStorage.setItem(destination.storageKey, destination.entityId);
+    navigate(destination.page);
+  }
+
+  async function handleDeleteWorkspace(confirmName) {
+    await workspaceAPI.delete(workspaceId, confirmName);
+    let remaining = workspaces.filter((workspace) => getItemId(workspace) !== workspaceId);
+    try { remaining = getList(await workspaceAPI.getAll(), "workspaces"); } catch { /* deletion succeeded; keep the local navigation usable */ }
+    setWorkspaces(remaining);
+    setProjects([]);
+    setWorkspaceId(getItemId(remaining[0]));
+    setProjectId("");
+    navigate("dashboard");
+  }
+
+  async function handleDeleteProject(confirmName) {
+    await projectAPI.delete(workspaceId, projectId, confirmName);
+    let remaining = projects.filter((project) => getItemId(project) !== projectId);
+    try { remaining = getList(await projectAPI.getAll(workspaceId), "projects"); } catch { /* deletion succeeded; keep the local navigation usable */ }
+    setProjects(remaining);
+    setProjectId(getItemId(remaining[0]));
+    navigate("dashboard");
+  }
+
   function renderPage() {
+    if (activePage === "not-found") {
+      return <main className="public-page flex min-h-screen items-center justify-center px-6 text-center"><section><p className="public-eyebrow">404 · PAGE NOT FOUND</p><h1 className="mt-4 text-3xl font-semibold">This page isn’t here.</h1><p className="mt-3 text-sm text-muted">The address may have changed, or the page may no longer exist.</p><button type="button" onClick={() => navigate("home")} className="public-button mt-6">Back to DevSync</button></section></main>;
+    }
     if (activePage === "login") {
       return <Login onNavigate={navigate} onLogin={handleLogin} />;
     }
+
+    if (activePage === "home") return <Home onNavigate={navigate} />;
 
     if (activePage === "register") {
       return <Register onNavigate={navigate} onLogin={handleLogin} />;
@@ -391,6 +479,9 @@ function App() {
       case "dashboard":
         return <Dashboard
           onNavigate={navigate}
+          onOpenTask={openTaskContext}
+          onOpenDiscussion={openDiscussionContext}
+          onOpenDecision={openDecisionContext}
           workspaceId={workspaceId}
           projectId={projectId}
         />;
@@ -436,13 +527,15 @@ function App() {
           />
         );
       case "settings":
-        return <Settings />;
+      {
+        const settingsWorkspace = workspaces.find((item) => getItemId(item) === workspaceId);
+        const settingsRole = settingsWorkspace?.members?.find((item) => String(item.user?._id || item.user) === String(user?._id || user?.id))?.role;
+        return <Settings user={user} workspace={settingsWorkspace} project={projects.find((item) => getItemId(item) === projectId)} canManageWorkspace={settingsRole === "Admin"} onMemberRoleChange={handleMemberRoleChange} onDeleteWorkspace={handleDeleteWorkspace} onDeleteProject={handleDeleteProject} onUserUpdate={(updated) => { setUser(updated); saveSession({ token: getToken(), user: updated }); }} onLogout={handleLogout} />;
+      }
       case "activity":
         return <Activity key={`${workspaceId}:${projectId}`} workspaceId={workspaceId} projectId={projectId} onOpenTask={openTaskContext} onOpenDecision={openDecisionContext} onOpenDiscussion={openDiscussionContext} />;
       case "search":
         return <Search key={`${workspaceId}:${projectId}`} workspaceId={workspaceId} projectId={projectId} onOpenTask={openTaskContext} onOpenDecision={openDecisionContext} onOpenDiscussion={openDiscussionContext} />;
-      case "ai-suggestions":
-        return <AISuggestions key={`${workspaceId}:${projectId}`} workspaceId={workspaceId} projectId={projectId} onOpenTask={openTaskContext} onOpenDecision={openDecisionContext} onOpenDiscussion={openDiscussionContext} />;
       default:
         return <Dashboard onNavigate={navigate} />;
     }
@@ -457,7 +550,7 @@ function App() {
     );
   }
 
-  if (!user || publicPages.includes(activePage)) {
+  if (!user || publicPages.includes(activePage) || activePage === "not-found") {
     return <div className="min-h-screen bg-bg text-text">{renderPage()}</div>;
   }
 
@@ -491,10 +584,22 @@ function App() {
         activePage={activePage}
         onNavigate={navigate}
         onCollapseChange={setSidebarCollapsed}
+        workspace={selectedWorkspace}
+        workspaces={workspaces}
+        workspaceId={workspaceId}
+        onWorkspaceChange={(id) => { setWorkspaceId(id); setProjectId(""); setProjectError(""); navigate("dashboard"); }}
+        projects={projects}
+        projectId={projectId}
+        onProjectChange={(id) => { setProjectId(id); navigate("dashboard"); }}
+        onCreateProject={() => setDialogType("createProject")}
+        onCreateWorkspace={() => setDialogType("createWorkspace")}
+        user={user}
+        mobileOpen={mobileNavOpen}
+        onMobileClose={closeMobileNavigation}
       />
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <Header activePage={activePage} workspaceId={workspaceId} projectId={projectId} onNavigate={navigate} onOpenTask={openTaskContext} onOpenDecision={openDecisionContext} onOpenDiscussion={openDiscussionContext} />
+        <Header activePage={activePage} onNavigate={navigate} onOpenNotification={openNotification} onToggleNavigation={() => setMobileNavOpen((open) => !open)} mobileNavOpen={mobileNavOpen} mobileNavToggleRef={mobileNavToggleRef} />
 
         <main
           className={`min-h-0 flex-1 overflow-y-auto p-4 sm:p-6 ${sidebarCollapsed ? "lg:px-8" : ""
@@ -566,7 +671,7 @@ function App() {
                 + Project
               </button>
               {selectedWorkspace?.members?.some((member) => String(member.user?._id || member.user) === String(user._id || user.id) && member.role === "Admin") && (
-                <button type="button" onClick={() => setDialogType("invite")} className="rounded-lg border border-line bg-surface px-3 py-2 text-sm font-medium text-text hover:bg-hover">Invite</button>
+                <button type="button" onClick={() => setDialogType("invite")} className="rounded-lg border border-line bg-surface px-3 py-2 text-sm font-medium text-text hover:bg-hover">Invite Members</button>
               )}
             </div>
 

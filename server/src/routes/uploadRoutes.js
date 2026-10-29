@@ -12,7 +12,7 @@ const Upload = require("../models/Upload");
 const UploadQuota = require("../models/UploadQuota");
 const authMiddleware = require("../middleware/authMiddleware");
 const { createRateLimiter } = require("../utils/rateLimiter");
-const { MAX_FILE_BYTES, MAX_FILES, WORKSPACE_USER_QUOTA_BYTES, parseUploadContentLength } = require("../utils/uploadPolicy");
+const { MAX_FILE_BYTES, MAX_FILES, WORKSPACE_USER_QUOTA_BYTES, parseUploadContentLength, getUploadType, getSupportedUploadFormats, hasValidUploadSignature } = require("../utils/uploadPolicy");
 
 const router = express.Router();
 router.use(authMiddleware);
@@ -20,25 +20,25 @@ router.use(authMiddleware);
 const uploadDirectory = path.resolve(process.env.DEVSYNC_UPLOAD_DIRECTORY || path.join(__dirname, "../../uploads"));
 if (!fs.existsSync(uploadDirectory)) fs.mkdirSync(uploadDirectory, { recursive: true });
 
-const allowedTypes = {
-  "image/jpeg": ".jpg",
-  "image/png": ".png",
-  "image/webp": ".webp",
-  "application/pdf": ".pdf",
-  "text/plain": ".txt",
-};
 const uploadRateLimit = createRateLimiter({ limit: 10, windowMs: 15 * 60 * 1000, keyGenerator: (req) => String(req.user._id) });
 
 const storage = multer.diskStorage({
   destination: (_req, _file, callback) => callback(null, uploadDirectory),
-  filename: (_req, file, callback) => callback(null, `${crypto.randomUUID()}${allowedTypes[file.mimetype] || ".bin"}`),
+  filename: (_req, file, callback) => callback(null, `${crypto.randomUUID()}${file.detectedSuffix}`),
 });
 
 const upload = multer({
   storage,
   limits: { fileSize: MAX_FILE_BYTES, files: MAX_FILES, fields: 2, parts: MAX_FILES + 2, fieldSize: 256, fieldNameSize: 64 },
   fileFilter: (_req, file, callback) => {
-    if (!allowedTypes[file.mimetype]) return callback(new Error("Only JPG, PNG, WebP, PDF, and TXT files are allowed."));
+    const rule = getUploadType(file.originalname, file.mimetype);
+    if (!rule) {
+      const error = new Error("Only JPG, PNG, WebP, PDF, and TXT files are allowed.");
+      error.code = "UNSUPPORTED_FILE_TYPE";
+      return callback(error);
+    }
+    file.detectedMimetype = rule.mimetype;
+    file.detectedSuffix = rule.suffix;
     callback(null, true);
   },
 });
@@ -63,14 +63,7 @@ async function hasValidContent(file) {
     const header = Buffer.alloc(12);
     const { bytesRead } = await handle.read(header, 0, header.length, 0);
     const bytes = header.subarray(0, bytesRead);
-    switch (file.mimetype) {
-      case "image/jpeg": return bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
-      case "image/png": return bytes.length >= 8 && bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
-      case "image/webp": return bytes.length >= 12 && bytes.toString("ascii", 0, 4) === "RIFF" && bytes.toString("ascii", 8, 12) === "WEBP";
-      case "application/pdf": return bytes.length >= 5 && bytes.toString("ascii", 0, 5) === "%PDF-";
-      case "text/plain": return !bytes.includes(0);
-      default: return false;
-    }
+    return hasValidUploadSignature(file.detectedMimetype, bytes);
   } finally {
     await handle.close();
   }
@@ -87,7 +80,7 @@ async function reserveQuota(workspaceId, userId, bytes) {
       ],
     },
   };
-  const reserveExisting = () => UploadQuota.findOneAndUpdate(filter, { $inc: { reservedBytes: bytes } }, { new: true });
+  const reserveExisting = () => UploadQuota.findOneAndUpdate(filter, { $inc: { reservedBytes: bytes } }, { returnDocument: "after" });
   if (await reserveExisting()) return true;
   try {
     await UploadQuota.create({ workspace: workspaceId, user: userId, usedBytes: 0, reservedBytes: bytes });
@@ -102,10 +95,12 @@ async function settleQuota(workspaceId, userId, reservedBytes, usedBytes = 0) {
   const quota = await UploadQuota.findOneAndUpdate(
     { workspace: workspaceId, user: userId, reservedBytes: { $gte: reservedBytes } },
     { $inc: { reservedBytes: -reservedBytes, usedBytes } },
-    { new: true }
+    { returnDocument: "after" }
   );
   if (!quota) throw new Error("Upload quota reservation could not be settled.");
 }
+
+router.get("/config", (_req, res) => res.json({ maxFileBytes: MAX_FILE_BYTES, maxFiles: MAX_FILES, formats: getSupportedUploadFormats() }));
 
 router.post("/", uploadRateLimit, async (req, res) => {
   if (!req.is("multipart/form-data")) return res.status(400).json({ success: false, message: "Expected a multipart file upload." });
@@ -129,11 +124,15 @@ router.post("/", uploadRateLimit, async (req, res) => {
         await removeFiles(files).catch((cleanupError) => console.error("Failed to remove rejected upload files:", cleanupError.message));
         await settleQuota(scope.workspace._id, req.user._id, length.bytes).catch((quotaError) => console.error("Upload quota release failed:", quotaError.message));
         const message = error instanceof multer.MulterError && error.code === "LIMIT_FILE_SIZE"
-          ? "Each file must be 5 MB or smaller."
+          ? `Each file must be ${Math.ceil(MAX_FILE_BYTES / (1024 * 1024))} MB or smaller.`
           : error instanceof multer.MulterError && error.code === "LIMIT_FILE_COUNT"
             ? "You can upload at most 5 files at once."
-            : error.message || "File upload failed.";
-        return res.status(400).json({ success: false, message });
+            : error.code === "UNSUPPORTED_FILE_TYPE"
+              ? "Only JPG, PNG, WebP, PDF, and TXT files are allowed."
+              : "File storage is unavailable. Please try again.";
+        const status = error.code === "UNSUPPORTED_FILE_TYPE" ? 415 : error.code === "LIMIT_FILE_SIZE" ? 413 : error.code === "LIMIT_FILE_COUNT" ? 400 : 500;
+        const malformedForm = !(error instanceof multer.MulterError) && /multipart|form boundary|unexpected end/i.test(error.message || "");
+        return res.status(malformedForm ? 400 : status === 415 ? 400 : status).json({ success: false, message: malformedForm ? "The multipart upload is incomplete or malformed." : message });
       }
       if ((req.body?.workspaceId && String(req.body.workspaceId) !== String(scope.workspace._id)) ||
           (req.body?.projectId && String(req.body.projectId) !== String(scope.project._id))) {
@@ -149,7 +148,7 @@ router.post("/", uploadRateLimit, async (req, res) => {
       } catch (callbackError) {
         await removeFiles(req.files || []).catch(() => {});
         await settleQuota(scope.workspace._id, req.user._id, length.bytes).catch(() => {});
-        console.error("Upload processing failed:", callbackError.message);
+        console.error("Upload processing failed.");
         if (!res.headersSent) res.status(500).json({ success: false, message: "File upload failed." });
       }
     });
@@ -175,7 +174,7 @@ async function persistUploads(req, res, files) {
       const asset = await Upload.create({
         filename: file.filename,
         originalName: file.originalname,
-        mimetype: file.mimetype,
+        mimetype: file.detectedMimetype,
         size: file.size,
         workspace: workspaceId._id,
         project: projectId._id,

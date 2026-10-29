@@ -536,7 +536,7 @@ router.put("/:id", async (req, res) => {
         workspace: access.workspace._id,
       },
       { $set: updates },
-      { new: true, runValidators: true }
+      { returnDocument: "after", runValidators: true }
     );
 
     if (!updated) {

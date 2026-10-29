@@ -12,7 +12,6 @@ import {
   MessageSquare,
   LoaderCircle,
   AlertCircle,
-  CheckCircle2,
   ClipboardList,
 } from "lucide-react";
 
@@ -419,7 +418,7 @@ export default function Decisions({ workspaceId, projectId, workspace, project, 
   }, [workspaceId, projectId, isTrashView]);
 
   useEffect(() => {
-    loadDecisions();
+    Promise.resolve().then(loadDecisions);
   }, [loadDecisions]);
 
   const projects = useMemo(

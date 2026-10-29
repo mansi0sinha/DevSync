@@ -14,6 +14,10 @@ const workspaceInvitationSchema = new mongoose.Schema(
     expiresAt: { type: Date, required: true, index: true },
     acceptedAt: { type: Date, default: null },
     acceptedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+    revokedAt: { type: Date, default: null },
+    revokedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+    acceptanceClaim: { type: String, default: null, select: false },
+    acceptanceClaimExpiresAt: { type: Date, default: null, index: true, select: false },
   },
   { timestamps: true }
 );

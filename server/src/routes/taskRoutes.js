@@ -11,7 +11,9 @@ const authMiddleware = require("../middleware/authMiddleware");
 const { emitProjectEvent } = require("../realtime");
 const { recordProjectEvent } = require("../services/projectEvents");
 const { createTaskRecord } = require("../services/projectRecords");
+const { deleteTask: deleteTaskAndReferences } = require("../services/resourceDeletion");
 const { parsePullRequestUrl } = require("../utils/githubPullRequest");
+const { canAssignTask, canChangeTaskStatus, isWorkspaceAdmin } = require("../utils/taskWorkflow");
 
 const router = express.Router();
 
@@ -45,6 +47,9 @@ function sendScopeError(res, error) {
 
 function populatedTask(query) {
   return query.populate("assignee", "name email avatar")
+    .populate("createdBy", "name email avatar")
+    .populate("completedBy", "name email")
+    .populate("acceptanceCriteria.completedBy", "name email")
     .populate("comments.author", "name email avatar");
 }
 
@@ -77,6 +82,7 @@ router.post("/:id/github-prs", async (req, res) => {
     if (scope.error) return sendScopeError(res, scope.error);
     const task = await Task.findOne({ _id: req.params.id, workspace: scope.workspace._id, project: scope.project._id });
     if (!task) return res.status(404).json({ success: false, message: "Task not found in the selected project." });
+    if (String(task.assignee || "") !== String(req.user._id) && !isWorkspaceAdmin(scope.workspace, req.user._id) && String(task.createdBy) !== String(req.user._id)) return res.status(403).json({ success: false, message: "Only the assignee, task creator, or workspace owner/admin may link a pull request." });
     if (task.pullRequests.some((entry) => entry.repositoryKey === parsed.repositoryKey && entry.number === parsed.number)) return res.status(409).json({ success: false, message: "This pull request is already linked to the task." });
     if (await findDuplicatePullRequest(parsed, task._id)) return res.status(409).json({ success: false, message: "This pull request is already linked to another task." });
     if (task.pullRequests.length >= 20) return res.status(409).json({ success: false, message: "This task has reached its pull request limit." });
@@ -106,6 +112,7 @@ router.put("/:id/github-prs/:pullRequestId", async (req, res) => {
     if (scope.error) return sendScopeError(res, scope.error);
     const task = await Task.findOne({ _id: req.params.id, workspace: scope.workspace._id, project: scope.project._id });
     if (!task) return res.status(404).json({ success: false, message: "Task not found in the selected project." });
+    if (String(task.assignee || "") !== String(req.user._id) && !isWorkspaceAdmin(scope.workspace, req.user._id) && String(task.createdBy) !== String(req.user._id)) return res.status(403).json({ success: false, message: "Only the assignee, task creator, or workspace owner/admin may edit a pull request link." });
     const link = task.pullRequests.id(req.params.pullRequestId);
     if (!link) return res.status(404).json({ success: false, message: "Pull request link not found." });
     const duplicateInTask = task.pullRequests.some((entry) => String(entry._id) !== req.params.pullRequestId && entry.repositoryKey === parsed.repositoryKey && entry.number === parsed.number);
@@ -127,6 +134,7 @@ router.delete("/:id/github-prs/:pullRequestId", async (req, res) => {
     if (scope.error) return sendScopeError(res, scope.error);
     const task = await Task.findOne({ _id: req.params.id, workspace: scope.workspace._id, project: scope.project._id });
     if (!task) return res.status(404).json({ success: false, message: "Task not found in the selected project." });
+    if (String(task.assignee || "") !== String(req.user._id) && !isWorkspaceAdmin(scope.workspace, req.user._id) && String(task.createdBy) !== String(req.user._id)) return res.status(403).json({ success: false, message: "Only the assignee, task creator, or workspace owner/admin may remove a pull request link." });
     const link = task.pullRequests.id(req.params.pullRequestId);
     if (!link) return res.status(404).json({ success: false, message: "Pull request link not found." });
     const number = link.number;
@@ -153,6 +161,7 @@ function validateTaskFields(body, requireTitle = false) {
   }
   if (body.title !== undefined && (typeof body.title !== "string" || !body.title.trim() || body.title.trim().length > 120)) return "Task title must be between 1 and 120 characters.";
   if (body.description !== undefined && (typeof body.description !== "string" || body.description.length > 2000)) return "Task description must be 2000 characters or fewer.";
+  if (body.acceptanceCriteria !== undefined && (!Array.isArray(body.acceptanceCriteria) || body.acceptanceCriteria.length > 20 || body.acceptanceCriteria.some((item) => !item || typeof item.text !== "string" || !item.text.trim() || item.text.trim().length > 300 || typeof item.completed !== "boolean"))) return "Acceptance criteria must contain up to 20 items with text and completion state.";
   if (body.status !== undefined && !validStatuses.includes(body.status)) return "Invalid task status.";
   if (body.priority !== undefined && !validPriorities.includes(body.priority)) return "Invalid task priority.";
   if (body.dueDate !== undefined && body.dueDate !== null && body.dueDate !== "" && Number.isNaN(new Date(body.dueDate).getTime())) return "Invalid due date.";
@@ -265,11 +274,13 @@ router.post("/", async (req, res) => {
     if (validationError) return res.status(400).json({ success: false, message: validationError });
     const assigneeResult = await resolveAssignee(assignee, scope.workspace);
     if (assigneeResult.error) return res.status(400).json({ success: false, message: assigneeResult.error });
+    if (status && status !== "todo") return res.status(400).json({ success: false, message: "New tasks start in To Do. The assignee starts work from the task." });
+    if (assigneeResult.value && String(assigneeResult.value) !== String(req.user._id) && !isWorkspaceAdmin(scope.workspace, req.user._id)) return res.status(403).json({ success: false, message: "Only workspace owners, admins, or the task creator may assign this task to another member." });
 
     const created = await createTaskRecord({
       scope,
       actorId: req.user._id,
-      fields: { title, description, status, priority, dueDate: dueDate || null, assignee: assigneeResult.value },
+      fields: { title, description, status: "todo", priority, dueDate: dueDate || null, assignee: assigneeResult.value, acceptanceCriteria: req.body.acceptanceCriteria },
     });
     const task = await populatedTask(Task.findById(created._id));
     await emitProjectEvent(req.app.get("io"), {
@@ -308,7 +319,7 @@ router.put("/:id", async (req, res) => {
     if (validationError) return res.status(400).json({ success: false, message: validationError });
 
     const updates = {};
-    for (const field of ["title", "description", "status", "priority", "dueDate"]) {
+    for (const field of ["title", "description", "status", "priority", "dueDate", "acceptanceCriteria"]) {
       if (Object.prototype.hasOwnProperty.call(req.body, field)) updates[field] = field === "dueDate" && req.body[field] === "" ? null : req.body[field];
     }
     if (Object.prototype.hasOwnProperty.call(req.body, "assignee")) {
@@ -319,11 +330,30 @@ router.put("/:id", async (req, res) => {
     if (Object.keys(updates).length === 0) return res.status(400).json({ success: false, message: "No editable task fields were provided." });
 
     const taskScope = { _id: req.params.id, workspace: scope.workspace._id, project: scope.project._id };
-    const previous = await Task.findOne(taskScope).select("title status priority description assignee");
+    const previous = await Task.findOne(taskScope).select("title status priority description assignee createdBy acceptanceCriteria");
     if (!previous) return res.status(404).json({ success: false, message: "Task not found in the selected project." });
 
-    const updated = await Task.findOneAndUpdate(taskScope, { $set: updates }, { new: true, runValidators: true });
-    if (!updated) return res.status(404).json({ success: false, message: "Task not found in the selected project." });
+    const statusChanged = Object.hasOwn(updates, "status") && previous.status !== updates.status;
+    if (statusChanged && !canChangeTaskStatus({ current: previous.status, next: updates.status, assigneeId: previous.assignee, actorId: req.user._id, workspace: scope.workspace })) {
+      return res.status(403).json({ success: false, message: "Only the assigned developer can move this task through its workflow. Use authorized manual completion if needed." });
+    }
+    if (updates.status === "done") return res.status(403).json({ success: false, message: "Tasks complete after a merged PR or an authorized manual completion." });
+    if (Object.hasOwn(updates, "assignee") && String(updates.assignee || "") !== String(previous.assignee || "") && !canAssignTask({ actorId: req.user._id, taskCreatorId: previous.createdBy, workspace: scope.workspace })) {
+      return res.status(403).json({ success: false, message: "Only the task creator or a workspace owner/admin may reassign this task." });
+    }
+    if (Object.hasOwn(updates, "acceptanceCriteria")) {
+      const previousCriteria = new Map(previous.acceptanceCriteria.map((item) => [String(item._id), item]));
+      updates.acceptanceCriteria = updates.acceptanceCriteria.map((item) => {
+        const old = previousCriteria.get(String(item._id));
+        const canCheck = isWorkspaceAdmin(scope.workspace, req.user._id) || String(previous.assignee || "") === String(req.user._id);
+        const completed = Boolean(old?.completed || (item.completed && canCheck));
+        return { text: item.text.trim(), completed, completedBy: completed ? (old?.completedBy || req.user._id) : null, completedAt: completed ? (old?.completedAt || new Date()) : null, ...(old?._id ? { _id: old._id } : {}) };
+      });
+    }
+
+    const conditionalScope = statusChanged ? { ...taskScope, status: previous.status } : taskScope;
+    const updated = await Task.findOneAndUpdate(conditionalScope, { $set: updates }, { returnDocument: "after", runValidators: true });
+    if (!updated) return res.status(statusChanged ? 409 : 404).json({ success: false, message: statusChanged ? "Task status changed in another request. Refresh and try again." : "Task not found in the selected project." });
     const updatedTask = await populatedTask(Task.findById(updated._id));
     await emitProjectEvent(req.app.get("io"), {
       workspaceId: scope.workspace._id,
@@ -331,7 +361,6 @@ router.put("/:id", async (req, res) => {
     }, "task:updated", { task: updatedTask });
     const assignmentChanged = Object.prototype.hasOwnProperty.call(updates, "assignee") && String(previous.assignee || "") !== String(updated.assignee || "");
     const materialChanged = ["title", "description", "status", "priority", "dueDate"].some((field) => Object.prototype.hasOwnProperty.call(updates, field));
-    const statusChanged = Object.prototype.hasOwnProperty.call(updates, "status") && previous.status !== updated.status;
     const notificationRecipients = [];
     if (assignmentChanged) {
       if (updated.assignee) notificationRecipients.push({ recipient: updated.assignee, type: "task.assigned", title: "You were assigned a task" });
@@ -341,8 +370,8 @@ router.put("/:id", async (req, res) => {
     }
     await recordProjectEvent({
       io: req.app.get("io"), actorId: req.user._id, workspaceId: scope.workspace._id,
-      projectId: scope.project._id, action: statusChanged ? "task.status_changed" : "task.updated",
-      summary: `${statusChanged ? "Changed status of" : "Updated"} task: ${updated.title}`,
+      projectId: scope.project._id, action: assignmentChanged ? "task.assigned" : statusChanged ? "task.status_changed" : "task.updated",
+      summary: `${assignmentChanged ? "Changed assignee of" : statusChanged ? "Changed status of" : "Updated"} task: ${updated.title}`,
       entityType: "task", entityId: updated._id, eventKey: `task.updated:${updated._id}:${updated.updatedAt?.getTime() || Date.now()}`,
       notifications: notificationRecipients.map((item) => ({ ...item, message: updated.title, eventKey: String(updated.updatedAt?.getTime() || Date.now()) })),
     });
@@ -357,6 +386,32 @@ router.put("/:id", async (req, res) => {
   }
 });
 
+// POST /api/tasks/:id/complete — manual fallback for workspace owners/admins.
+router.post("/:id/complete", async (req, res) => {
+  try {
+    if (!isValidId(req.params.id)) return res.status(400).json({ success: false, message: "Invalid task ID." });
+    if (!req.body || typeof req.body !== "object" || Array.isArray(req.body) || Object.keys(req.body).some((key) => key !== "completionNote") || typeof req.body.completionNote !== "string" || !req.body.completionNote.trim() || req.body.completionNote.trim().length > 500) {
+      return res.status(400).json({ success: false, message: "A completion note of 1 to 500 characters is required." });
+    }
+    const scope = await getAuthorizedScope(req.query.workspaceId, req.query.projectId, req.user._id);
+    if (scope.error) return sendScopeError(res, scope.error);
+    if (!isWorkspaceAdmin(scope.workspace, req.user._id)) return res.status(403).json({ success: false, message: "Only a workspace owner or admin can manually complete a task." });
+    const completedAt = new Date();
+    const task = await Task.findOneAndUpdate({ _id: req.params.id, workspace: scope.workspace._id, project: scope.project._id, status: "in-review" }, {
+      $set: { status: "done", completedAt, completedBy: req.user._id, completionMethod: "manual", completionNote: req.body.completionNote.trim() },
+    }, { returnDocument: "after", runValidators: true });
+    if (!task) return res.status(409).json({ success: false, message: "Only tasks in Review can be manually completed." });
+    const updatedTask = await populatedTask(Task.findById(task._id));
+    await emitProjectEvent(req.app.get("io"), { workspaceId: scope.workspace._id, projectId: scope.project._id }, "task:updated", { task: updatedTask });
+    await recordProjectEvent({ io: req.app.get("io"), actorId: req.user._id, workspaceId: scope.workspace._id, projectId: scope.project._id,
+      action: "task.completed", summary: `Manually completed task: ${task.title}`, entityType: "task", entityId: task._id,
+      eventKey: `task.completed:manual:${task._id}:${completedAt.getTime()}`,
+      notifications: task.assignee ? [{ recipient: task.assignee, type: "task.completed", title: "Task completed", message: task.title, eventKey: String(completedAt.getTime()) }] : [],
+    });
+    return res.json({ success: true, data: updatedTask });
+  } catch (error) { return handleError(res, error, "Could not complete task."); }
+});
+
 // DELETE /api/tasks/:id
 router.delete("/:id", async (req, res) => {
   try {
@@ -368,11 +423,10 @@ router.delete("/:id", async (req, res) => {
     }
     const scope = await getAuthorizedScope(req.query.workspaceId, req.query.projectId, req.user._id);
     if (scope.error) return sendScopeError(res, scope.error);
-    const deletedTask = await Task.findOneAndDelete({
-      _id: req.params.id,
-      workspace: scope.workspace._id,
-      project: scope.project._id,
-    });
+    const existing = await Task.findOne({ _id: req.params.id, workspace: scope.workspace._id, project: scope.project._id }).select("createdBy");
+    if (!existing) return res.status(404).json({ success: false, message: "Task not found or access denied." });
+    if (!isWorkspaceAdmin(scope.workspace, req.user._id) && String(existing.createdBy) !== String(req.user._id)) return res.status(403).json({ success: false, message: "Only the task creator or workspace owner/admin may delete this task." });
+    const deletedTask = await deleteTaskAndReferences(scope.workspace._id, scope.project._id, req.params.id);
 
     if (!deletedTask) {
       return res.status(404).json({
@@ -389,7 +443,7 @@ router.delete("/:id", async (req, res) => {
       io: req.app.get("io"), actorId: req.user._id, workspaceId: scope.workspace._id,
       projectId: scope.project._id, action: "task.deleted", summary: `Deleted task: ${deletedTask.title}`,
       entityType: "task", entityId: deletedTask._id, eventKey: `task.deleted:${deletedTask._id}`,
-      notifications: deletedTask.assignee ? [{ recipient: deletedTask.assignee, type: "task.deleted", title: "An assigned task was deleted", message: deletedTask.title, eventKey: String(deletedTask.updatedAt?.getTime() || Date.now()) }] : [],
+      notifications: [],
     });
 
     return res.status(200).json({
