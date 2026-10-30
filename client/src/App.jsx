@@ -578,7 +578,7 @@ function App() {
     (item) => getItemId(item) === workspaceId
   );
   return (
-    <div className="flex h-screen overflow-hidden bg-bg text-text">
+    <div className="flex h-dvh overflow-hidden bg-bg text-text">
       <Sidebar
         activePage={activePage}
         onNavigate={navigate}
@@ -600,7 +600,7 @@ function App() {
         <Header activePage={activePage} onNavigate={navigate} onOpenNotification={openNotification} onToggleNavigation={() => setMobileNavOpen((open) => !open)} mobileNavOpen={mobileNavOpen} mobileNavToggleRef={mobileNavToggleRef} />
 
         <main
-          className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6"
+          className="min-h-0 min-w-0 flex-1 overflow-y-auto p-3 sm:p-6"
         >
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-2">
@@ -672,8 +672,8 @@ function App() {
               )}
             </div>
 
-            <div className="flex items-center gap-3">
-              <span className="text-sm text-muted">
+            <div className="flex min-w-0 flex-wrap items-center gap-3">
+              <span className="max-w-full truncate text-sm text-muted">
                 {user.name || user.email}
               </span>
               <button

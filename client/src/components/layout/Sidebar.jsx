@@ -1,5 +1,5 @@
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   LayoutDashboard,
   MessageSquare,
@@ -39,6 +39,11 @@ export default function Sidebar({
   onMobileClose,
 }) {
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const sidebarRef = useRef(null);
+
+  useEffect(() => {
+    if (mobileOpen) sidebarRef.current?.focus();
+  }, [mobileOpen]);
 
   function navigateAndClose(page) {
     onNavigate?.(page);
@@ -50,9 +55,27 @@ export default function Sidebar({
   return <>
     {mobileOpen && <button type="button" aria-label="Close navigation menu" onClick={onMobileClose} className="fixed inset-0 z-40 cursor-default bg-black/40 md:hidden" />}
     <aside
+      ref={sidebarRef}
       id="primary-sidebar"
+      role={mobileOpen ? "dialog" : undefined}
       aria-label="Primary navigation"
-      className={`fixed left-3 top-3 z-50 flex h-[calc(100dvh-1.5rem)] w-[min(16rem,calc(100vw-1.5rem))] shrink-0 flex-col overflow-hidden rounded-xl border border-line bg-side md:relative md:left-auto md:top-auto md:z-auto md:m-3 md:h-[calc(100vh-24px)] md:transition-[width] md:duration-200 ${mobileOpen ? "" : "hidden md:flex"} ${isCollapsed ? "md:w-24" : "md:w-64"}`}
+      tabIndex={mobileOpen ? -1 : undefined}
+      aria-modal={mobileOpen ? "true" : undefined}
+      onKeyDown={(event) => {
+        if (!mobileOpen || event.key !== "Tab") return;
+        const focusable = sidebarRef.current?.querySelectorAll('button:not([disabled]), select:not([disabled]), a[href], input:not([disabled]), [tabindex]:not([tabindex="-1"])');
+        if (!focusable?.length) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (event.shiftKey && (document.activeElement === first || document.activeElement === sidebarRef.current)) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+      }}
+      className={`fixed left-3 top-3 z-50 flex h-[calc(100dvh-1.5rem)] shrink-0 flex-col overflow-hidden rounded-xl border border-line bg-side transition-[width] duration-200 md:relative md:left-auto md:top-auto md:z-auto md:m-3 md:h-[calc(100dvh-24px)] ${mobileOpen ? "" : "hidden md:flex"} ${isCollapsed ? "w-20 md:w-24" : "w-[min(16rem,calc(100vw-1.5rem))] md:w-64"}`}
     >
       {/* Brand and collapse button */}
       <div

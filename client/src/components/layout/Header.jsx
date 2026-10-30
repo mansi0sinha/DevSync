@@ -41,14 +41,14 @@ export default function Header({ activePage = "dashboard", onNavigate, onOpenNot
     <header className="flex h-16 shrink-0 items-center justify-between border-b border-line bg-surface px-3 sm:px-6">
       {/* Current page */}
       <div className="flex min-w-0 items-center gap-2 sm:gap-3">
-        <button ref={mobileNavToggleRef} id="mobile-navigation-toggle" type="button" onClick={onToggleNavigation} aria-label={mobileNavOpen ? "Close navigation menu" : "Open navigation menu"} aria-expanded={mobileNavOpen} aria-controls="primary-sidebar" className="inline-flex shrink-0 rounded-md p-2 text-muted hover:bg-hover hover:text-text sm:hidden"><Menu size={20}/></button>
+        <button ref={mobileNavToggleRef} id="mobile-navigation-toggle" type="button" onClick={onToggleNavigation} aria-label={mobileNavOpen ? "Close navigation menu" : "Open navigation menu"} aria-expanded={mobileNavOpen} aria-controls="primary-sidebar" className="inline-flex shrink-0 rounded-md p-2 text-muted hover:bg-hover hover:text-text md:hidden"><Menu size={20}/></button>
         <PanelLeft
           size={18}
           strokeWidth={1.8}
-          className="hidden shrink-0 text-muted sm:block"
+          className="hidden shrink-0 text-muted md:block"
         />
 
-        <div className="hidden h-5 w-px bg-line sm:block" />
+        <div className="hidden h-5 w-px bg-line md:block" />
 
         <div className="flex min-w-0 items-center gap-2 text-sm">
           <span className="hidden text-muted md:inline">Workspace</span>

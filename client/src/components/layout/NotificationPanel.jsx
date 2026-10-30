@@ -12,6 +12,7 @@ export default function NotificationPanel({ onOpenNotification }) {
   const [unreadCount, setUnreadCount] = useState(0);
   const [nextCursor, setNextCursor] = useState(null);
   const panelRef = useRef(null);
+  const triggerRef = useRef(null);
   const cursorRef = useRef(null);
   const requestVersionRef = useRef(0);
 
@@ -41,7 +42,10 @@ export default function NotificationPanel({ onOpenNotification }) {
   useEffect(() => {
     if (!open) return undefined;
     function dismiss(event) {
-      if (event.type === "keydown" && event.key === "Escape") setOpen(false);
+      if (event.type === "keydown" && event.key === "Escape") {
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
       if (event.type === "pointerdown" && !panelRef.current?.contains(event.target)) setOpen(false);
     }
     document.addEventListener("pointerdown", dismiss);
@@ -94,13 +98,13 @@ export default function NotificationPanel({ onOpenNotification }) {
   const unread = unreadCount;
 
   return <div className="relative" ref={panelRef}>
-    <button type="button" onClick={() => { setOpen((value) => !value); if (!open) void load(); }} aria-label={`Notifications${unread ? `, ${unread} unread` : ""}`} aria-expanded={open} title="Notifications" className="relative inline-flex rounded-md p-2 text-muted hover:bg-hover hover:text-text">
+    <button ref={triggerRef} type="button" onClick={() => { setOpen((value) => !value); if (!open) void load(); }} aria-label={`Notifications${unread ? `, ${unread} unread` : ""}`} aria-expanded={open} aria-controls="notification-panel" title="Notifications" className="relative inline-flex rounded-md p-2 text-muted hover:bg-hover hover:text-text">
       <Bell size={19} strokeWidth={1.8} />{unread > 0 && <span className="absolute -right-1 -top-1 min-w-4 rounded-full bg-amb px-1 text-center text-[10px] font-bold leading-4 text-onAmb">{unread > 99 ? "99+" : unread}</span>}
     </button>
-    {open && <section aria-label="Notifications" className="absolute right-0 top-11 z-[60] w-[min(24rem,calc(100vw-1.5rem))] overflow-hidden rounded-xl border border-line bg-surface shadow-xl">
+    {open && <section id="notification-panel" aria-label="Notifications" className="fixed right-3 top-16 z-60 w-[calc(100vw-1.5rem)] max-w-96 overflow-hidden rounded-xl border border-line bg-surface shadow-xl md:absolute md:right-0 md:top-11 md:w-96">
       <header className="flex items-center justify-between border-b border-line px-4 py-3"><div><h2 className="font-semibold">Notifications</h2><p className="text-xs text-muted">{unread ? `${unread} unread` : "All caught up"}</p></div><div className="flex gap-1"><button type="button" onClick={() => void load()} aria-label="Refresh notifications" className="rounded p-2 text-muted hover:bg-hover"><RefreshCw size={15} /></button><button type="button" disabled={!unread} onClick={() => void markAll()} aria-label="Mark all as read" className="rounded p-2 text-muted hover:bg-hover disabled:opacity-40"><CheckCheck size={16} /></button></div></header>
       {error && items.length > 0 && <p role="alert" className="mx-3 mt-3 rounded-lg bg-red-50 p-2 text-xs text-red-800 dark:bg-red-950 dark:text-red-200">{error}<button type="button" className="ml-2 underline" onClick={() => void load()}>Retry</button></p>}
-      <div className="max-h-[min(65vh,28rem)] overflow-y-auto">
+      <div className="max-h-[min(65dvh,28rem)] overflow-y-auto overscroll-contain">
         {panelState === "loading" ? <p className="p-6 text-center text-sm text-muted" role="status">Loading notifications…</p>
           : panelState === "error" ? <div className="p-6 text-center"><p role="alert" className="text-sm text-red-700 dark:text-red-300">{error}</p><button type="button" onClick={() => void load()} className="mt-3 text-sm font-medium text-acc underline">Retry</button></div>
             : panelState === "empty" ? <p className="p-6 text-center text-sm text-muted">You’re all caught up.</p>

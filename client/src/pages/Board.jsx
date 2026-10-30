@@ -971,7 +971,8 @@ export default function Board({ workspaceId, projectId, workspace, project, onOp
       ) : loadError ? (
         <div className="rounded-xl border border-line bg-surface px-4 py-12 text-center text-sm text-muted">Project tasks are unavailable. Use Retry above to load them again.</div>
       ) : (
-        <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-2 2xl:grid-cols-4">
+        <div className="-mx-3 overflow-x-auto px-3 pb-2 md:mx-0 md:overflow-visible md:px-0">
+        <div className="grid min-w-[1080px] grid-cols-4 items-start gap-4 md:min-w-0 md:grid-cols-2 2xl:grid-cols-4">
           {columns.map((column) => {
             const columnTasks = filteredTasks.filter(
               (task) => task.status === column.id
@@ -1052,6 +1053,7 @@ export default function Board({ workspaceId, projectId, workspace, project, onOp
               </section>
             );
           })}
+        </div>
         </div>
       )}
 
