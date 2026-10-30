@@ -22,15 +22,19 @@ async function recordProjectEvent({ io, actorId = null, systemEvent = false, wor
         if (error.code !== 11000) throw error;
       }
     }
-    const memberIds = new Set(workspace.members.map((member) => String(member.user)));
-    for (const item of notifications) {
-      const recipientId = String(item.recipient || "");
-      if (!mongoose.isObjectIdOrHexString(recipientId) || (!systemEvent && recipientId === String(actorId)) || !memberIds.has(recipientId)) continue;
+    // Projects inherit access from their workspace, so every current workspace
+    // member can receive project activity notifications. Keep these notices
+    // generic because recipient-specific messages (for example, "You were
+    // assigned") would be misleading when broadcast to the whole project.
+    const recipients = new Set(workspace.members.map((member) => String(member.user)));
+    if (!systemEvent) recipients.delete(String(actorId));
+    for (const recipientId of recipients) {
+      if (!mongoose.isObjectIdOrHexString(recipientId)) continue;
       try {
-        const notificationEventKey = `${item.type}:${entityId}:${item.eventKey || activityKey}`;
+        const notificationEventKey = `project.activity:${entityId}:${eventKey || activityKey}`;
         if (await Notification.exists({ recipient: recipientId, eventKey: notificationEventKey })) continue;
         const notification = await Notification.create({
-          recipient: recipientId, actor: actorId || null, type: item.type, title: item.title, message: item.message,
+          recipient: recipientId, actor: actorId || null, type: "project.activity", title: "Project activity", message: summary,
           workspace: workspaceId, project: projectId, entityType, entityId,
           eventKey: notificationEventKey,
         });
