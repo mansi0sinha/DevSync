@@ -25,7 +25,6 @@ const navigation = [
 export default function Sidebar({
   activePage = "dashboard",
   onNavigate,
-  onCollapseChange,
   workspace,
   workspaces = [],
   workspaceId,
@@ -46,20 +45,14 @@ export default function Sidebar({
     onMobileClose?.();
   }
 
-  const toggleSidebar = () => {
-    setIsCollapsed((current) => {
-      const next = !current;
-      onCollapseChange?.(next);
-      return next;
-    });
-  };
+  const toggleSidebar = () => setIsCollapsed((current) => !current);
 
   return <>
     {mobileOpen && <button type="button" aria-label="Close navigation menu" onClick={onMobileClose} className="fixed inset-0 z-40 cursor-default bg-black/40 md:hidden" />}
     <aside
       id="primary-sidebar"
       aria-label="Primary navigation"
-      className={`fixed left-3 top-3 z-50 flex h-[calc(100dvh-1.5rem)] w-[min(16rem,calc(100vw-1.5rem))] shrink-0 flex-col overflow-hidden rounded-xl border border-line bg-side md:relative md:left-auto md:top-auto md:z-auto md:m-3 md:h-[calc(100vh-24px)] md:w-64 md:transition-[width] md:duration-200 ${mobileOpen ? "" : "hidden md:flex"} ${isCollapsed ? "md:w-19" : ""}`}
+      className={`fixed left-3 top-3 z-50 flex h-[calc(100dvh-1.5rem)] w-[min(16rem,calc(100vw-1.5rem))] shrink-0 flex-col overflow-hidden rounded-xl border border-line bg-side md:relative md:left-auto md:top-auto md:z-auto md:m-3 md:h-[calc(100vh-24px)] md:transition-[width] md:duration-200 ${mobileOpen ? "" : "hidden md:flex"} ${isCollapsed ? "md:w-24" : "md:w-64"}`}
     >
       {/* Brand and collapse button */}
       <div

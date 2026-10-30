@@ -60,7 +60,6 @@ function getItemId(item) {
 
 function App() {
   const [activePage, setActivePage] = useState(getPageFromURL);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [user, setUser] = useState(getSavedUser);
   const [checkingSession, setCheckingSession] = useState(Boolean(getToken()));
 
@@ -583,7 +582,6 @@ function App() {
       <Sidebar
         activePage={activePage}
         onNavigate={navigate}
-        onCollapseChange={setSidebarCollapsed}
         workspace={selectedWorkspace}
         workspaces={workspaces}
         workspaceId={workspaceId}
@@ -602,8 +600,7 @@ function App() {
         <Header activePage={activePage} onNavigate={navigate} onOpenNotification={openNotification} onToggleNavigation={() => setMobileNavOpen((open) => !open)} mobileNavOpen={mobileNavOpen} mobileNavToggleRef={mobileNavToggleRef} />
 
         <main
-          className={`min-h-0 flex-1 overflow-y-auto p-4 sm:p-6 ${sidebarCollapsed ? "lg:px-8" : ""
-            }`}
+          className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6"
         >
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-2">

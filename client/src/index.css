@@ -121,7 +121,7 @@ body,
   --public-decision-surface: #FFF5DD;
   --public-decision-text: #79520C;
   min-height: 100vh;
-  overflow: hidden;
+  overflow: clip;
   background: var(--public-bg);
   color: var(--public-text);
   font-family: var(--font-sans);
@@ -156,7 +156,10 @@ html.dark .public-page {
 .public-section-inner,
 .public-nav { width: min(1180px, calc(100% - 48px)); margin-inline: auto; }
 .public-header {
-   position: relative; z-index: 2; border-bottom: 1px solid var(--public-border); background: var(--public-bg); }
+   position: sticky; top: 0; z-index: 2; border-bottom: 1px solid var(--public-border); background: var(--public-bg); }
+.public-page #product,
+.public-page #workflow,
+.public-page #features { scroll-margin-top: 70px; }
 .public-nav { min-height: 70px; display: flex; align-items: center; justify-content: space-between; gap: 28px; }
 .public-brand,
 .public-auth-brand { display: inline-flex; align-items: center; gap: 10px; font-size: 18px; font-weight: 700; letter-spacing: -.035em; }
@@ -346,6 +349,9 @@ html.dark .public-mark-dark { display: inline-block; }
   .public-features-inner { gap: 38px; }
 }
 @media (max-width: 680px) {
+  .public-page #product,
+  .public-page #workflow,
+  .public-page #features { scroll-margin-top: 62px; }
   .public-section-inner, .public-nav, .public-hero-inner { width: min(100% - 34px, 560px); }
   .public-nav { min-height: 62px; gap: 12px; }
   .public-nav-links, .public-nav-login { display: none; }

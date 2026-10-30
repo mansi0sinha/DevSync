@@ -558,6 +558,7 @@ export default function Discussion({ workspaceId, projectId, workspace, project,
   const [showDecisionModal, setShowDecisionModal] = useState(false);
   const [loading, setLoading] = useState(true);
   const [pageError, setPageError] = useState("");
+  const [composerError, setComposerError] = useState("");
   const [sendingMessage, setSendingMessage] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(null);
   const [uploadConfig, setUploadConfig] = useState({ maxFileBytes: DEFAULT_MAX_FILE_SIZE, maxFiles: MAX_FILES, formats: DEFAULT_UPLOAD_FORMATS });
@@ -781,7 +782,7 @@ export default function Discussion({ workspaceId, projectId, workspace, project,
       }
 
       if (file.size > uploadConfig.maxFileBytes) {
-        error = `${file.name}: each file must be ${formatFileSize(uploadConfig.maxFileBytes)} or smaller.`;
+        error = `${file.name} exceeds the maximum allowed file size of ${formatFileSize(uploadConfig.maxFileBytes)}.`;
         break;
       }
 
@@ -803,11 +804,11 @@ export default function Discussion({ workspaceId, projectId, workspace, project,
     }
 
     if (error) {
-      setPageError(error);
+      setComposerError(error);
       return;
     }
 
-    setPageError("");
+    setComposerError("");
     setSelectedFiles(nextFiles);
   }
 
@@ -858,9 +859,10 @@ export default function Discussion({ workspaceId, projectId, workspace, project,
 
       setMessage("");
       setSelectedFiles([]);
+      setComposerError("");
       setPageNotice("Message sent successfully.");
     } catch (error) {
-      setPageError(error.message || "Failed to send message or upload files.");
+      setComposerError(error.message || "Failed to send message or upload files.");
     } finally {
       setSendingMessage(false);
       setUploadProgress(null);
@@ -1330,6 +1332,8 @@ export default function Discussion({ workspaceId, projectId, workspace, project,
                       <Send size={14} />
                     </Button>
                   </div>
+
+                  {composerError && <p role="alert" className="mt-2 text-sm text-red-600 dark:text-red-300">{composerError}</p>}
                 </div>
               </form>
             </>
