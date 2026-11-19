@@ -91,14 +91,32 @@ button {
   cursor: pointer;
 }
 
+/* Native option menus do not reliably inherit Tailwind's semantic colors. */
+.theme-select {
+  color: var(--text);
+  color-scheme: light;
+}
+.dark .theme-select { color-scheme: dark; }
+.theme-select option {
+  background: var(--surface);
+  color: var(--text);
+}
+
 /* Keep authenticated theme/navigation changes instant; public pages opt into restrained motion. */
 html,
 body,
 #root,
-#root *:not(.public-page):not(.public-page *) {
+#root *:not(.public-page):not(.public-page *):not(.dashboard-motion):not(.dashboard-motion *) {
   transition-property: none !important;
   animation-duration: 0s !important;
 }
+
+@keyframes devsync-pulse-shimmer { to { transform: translateX(230%); } }
+.pulse-segment { position: relative; min-width: 0; transform-origin: left; border-radius: 6px; transition-property: width; }
+.pulse-segment:hover { filter: brightness(1.08); }
+.pulse-shimmer { overflow: hidden; }
+.pulse-shimmer::after { position: absolute; inset: 0 auto 0 -50%; width: 32%; content: ""; background: linear-gradient(90deg, transparent, rgba(255,255,255,.32), transparent); transform: skewX(-18deg); animation: devsync-pulse-shimmer 2.5s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .dashboard-motion, .dashboard-motion * { animation: none !important; transition: none !important; } }
 
 .public-page {
   --public-bg: #F6F6F3;

@@ -28,6 +28,7 @@ import {
   projectAPI,
 } from "./services/api";
 import { getNotificationDestination } from "./services/notificationNavigation";
+import { usePermissions } from "./hooks/usePermissions";
 
 const protectedPages = [
   "dashboard",
@@ -77,6 +78,8 @@ function App() {
   const [projectLoadAttempt, setProjectLoadAttempt] = useState(0);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const mobileNavToggleRef = useRef(null);
+  const activeWorkspace = workspaces.find((item) => getItemId(item) === workspaceId);
+  const { isAdmin } = usePermissions(activeWorkspace, user);
 
   const closeMobileNavigation = useCallback(() => {
     setMobileNavOpen(false);
@@ -574,9 +577,7 @@ function App() {
     return <WorkspaceOnboarding user={user} onCreateWorkspace={handleCreateWorkspace} onJoinWorkspace={handleJoinWorkspace} onLogout={handleLogout} />;
   }
 
-  const selectedWorkspace = workspaces.find(
-    (item) => getItemId(item) === workspaceId
-  );
+  const selectedWorkspace = activeWorkspace;
   return (
     <div className="flex h-dvh overflow-hidden bg-bg text-text">
       <Sidebar
@@ -597,13 +598,14 @@ function App() {
       />
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <Header activePage={activePage} onNavigate={navigate} onOpenNotification={openNotification} onToggleNavigation={() => setMobileNavOpen((open) => !open)} mobileNavOpen={mobileNavOpen} mobileNavToggleRef={mobileNavToggleRef} />
+        <Header activePage={activePage} onNavigate={navigate} onOpenNotification={openNotification} onToggleNavigation={() => setMobileNavOpen((open) => !open)} mobileNavOpen={mobileNavOpen} mobileNavToggleRef={mobileNavToggleRef} user={user} onLogout={handleLogout} />
 
         <main
           className="min-h-0 min-w-0 flex-1 overflow-y-auto p-3 sm:p-6"
         >
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <div className="flex flex-wrap items-center gap-2">
+          <div className="mb-6 flex flex-wrap items-end gap-4">
+            <div className="flex flex-wrap items-end gap-5">
+              <div><p className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">Workspace</p><div className="flex min-h-11 overflow-hidden rounded-xl border border-line bg-surface">
               <label className="sr-only" htmlFor="workspace-select">
                 Select workspace
               </label>
@@ -613,7 +615,7 @@ function App() {
                 value={workspaceId}
                 onChange={(event) => { setWorkspaceId(event.target.value); setProjectId(""); setProjectError(""); navigate("dashboard"); }}
                 disabled={loadingWorkspaces || workspaces.length === 0}
-                className="max-w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-text outline-none focus:border-teal-600"
+                className="theme-select max-w-[220px] border-r border-line bg-transparent px-3 text-sm text-text outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-acc"
               >
                 <option value="">
                   {loadingWorkspaces ? "Loading workspaces..." : "Select workspace"}
@@ -628,12 +630,13 @@ function App() {
               <button
                 type="button"
                 onClick={() => setDialogType("createWorkspace")}
-                className="rounded-lg border border-line bg-surface px-3 py-2 text-sm font-medium text-text hover:bg-hover"
+                className="border-r border-line px-3 text-sm font-medium text-text hover:bg-hover focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-acc"
               >
                 + Workspace
               </button>
-              <button type="button" onClick={() => setDialogType("join")} className="rounded-lg border border-line bg-surface px-3 py-2 text-sm font-medium text-text hover:bg-hover">Join</button>
+              <button type="button" onClick={() => setDialogType("join")} className="px-3 text-sm font-medium text-text hover:bg-hover focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-acc">Join</button></div></div>
 
+              <div><p className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">Project</p><div className="flex min-h-11 overflow-hidden rounded-xl border border-line bg-surface">
               <label className="sr-only" htmlFor="project-select">
                 Select project
               </label>
@@ -643,7 +646,7 @@ function App() {
                 value={projectId}
                 onChange={(event) => { setProjectId(event.target.value); navigate("dashboard"); }}
                 disabled={!workspaceId || loadingProjects || projects.length === 0}
-                className="max-w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-text outline-none focus:border-teal-600"
+                className="theme-select max-w-[220px] bg-transparent px-3 text-sm text-text outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-acc"
               >
                 <option value="">
                   {!workspaceId
@@ -663,27 +666,14 @@ function App() {
                 type="button"
                 onClick={() => setDialogType("createProject")}
                 disabled={!workspaceId}
-                className="rounded-lg bg-teal-700 px-3 py-2 text-sm font-semibold text-white hover:bg-teal-800 disabled:cursor-not-allowed disabled:opacity-50"
+                className="border-l border-acc/40 bg-acc px-3 text-sm font-semibold text-[#05211b] hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 + Project
               </button>
-              {selectedWorkspace?.members?.some((member) => String(member.user?._id || member.user) === String(user._id || user.id) && member.role === "Admin") && (
-                <button type="button" onClick={() => setDialogType("invite")} className="rounded-lg border border-line bg-surface px-3 py-2 text-sm font-medium text-text hover:bg-hover">Invite Members</button>
-              )}
+              </div></div>
+              {isAdmin && <button type="button" onClick={() => setDialogType("invite")} className="min-h-11 rounded-xl border border-acc/35 bg-accSoft px-3 text-sm font-semibold text-acc hover:bg-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc">Invite Members</button>}
             </div>
 
-            <div className="flex min-w-0 flex-wrap items-center gap-3">
-              <span className="max-w-full truncate text-sm text-muted">
-                {user.name || user.email}
-              </span>
-              <button
-                type="button"
-                onClick={handleLogout}
-                className="rounded-lg border border-line bg-surface px-3 py-2 text-sm font-semibold text-text hover:bg-hover"
-              >
-                Log out
-              </button>
-            </div>
           </div>
 
           {(workspaceError || projectError) && (

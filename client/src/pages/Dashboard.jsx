@@ -1,11 +1,9 @@
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   ArrowUpRight,
   CheckCircle2,
-  CircleDashed,
-  Clock3,
   GitMerge,
   MessageSquare,
   Plus,
@@ -109,6 +107,13 @@ function relativeTime(value) {
   return "Time unavailable";
 }
 
+function useReducedMotion() { const [reduced, setReduced] = useState(() => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false); useEffect(() => { const query = window.matchMedia?.("(prefers-reduced-motion: reduce)"); if (!query) return undefined; const update = () => setReduced(query.matches); query.addEventListener("change", update); return () => query.removeEventListener("change", update); }, []); return reduced; }
+function easeOut(time) { return 1 - (1 - time) ** 3; }
+function useCountUp(target, duration, reduced) { const [value, setValue] = useState(0); const prior = useRef(0); useEffect(() => { const from = prior.current; prior.current = target; if (reduced || from === target) { setValue(target); return undefined; } let frame; const started = performance.now(); const tick = (now) => { const time = Math.min(1, (now - started) / duration); setValue(from + (target - from) * easeOut(time)); if (time < 1) frame = requestAnimationFrame(tick); }; frame = requestAnimationFrame(tick); return () => cancelAnimationFrame(frame); }, [target, duration, reduced]); return value; }
+function ProgressRing({ percent }) { const reduced = useReducedMotion(); const value = useCountUp(percent, 1400, reduced); const radius = 56; const circumference = 2 * Math.PI * radius; return <div className="dashboard-motion relative grid h-[136px] w-[136px] shrink-0 place-items-center"><svg viewBox="0 0 136 136" className="h-full w-full -rotate-90" aria-hidden="true"><defs><linearGradient id="project-pulse-gradient" x1="0%" y1="0%" x2="100%" y2="100%"><stop stopColor="#5cd6bd"/><stop offset="1" stopColor="#6aa6ff"/></linearGradient><filter id="project-pulse-glow" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy="0" stdDeviation="4" floodColor="#5cd6bd" floodOpacity=".45"/></filter></defs><circle cx="68" cy="68" r={radius} fill="none" stroke="var(--hover)" strokeWidth="12"/><circle cx="68" cy="68" r={radius} fill="none" stroke="url(#project-pulse-gradient)" strokeWidth="12" strokeLinecap="round" strokeDasharray={circumference} strokeDashoffset={circumference * (1 - value / 100)} filter={value > 0 ? "url(#project-pulse-glow)" : undefined}/></svg><span className="absolute font-mono text-[30px] font-semibold tabular-nums text-text">{Math.round(value)}%</span></div>; }
+function PulseSegment({ item, total, index, reduced }) { const value = useCountUp(item.value, 900, reduced); const share = total ? value / total * 100 : 0; const percent = total ? Math.round(item.value / total * 100) : 0; return <div title={`${item.value} ${item.value === 1 ? "task" : "tasks"} · ${percent}%`} className={`pulse-segment ${item.shimmer ? "pulse-shimmer" : ""}`} style={{ width: `${share}%`, background: item.color, transition: reduced ? "none" : `width 900ms cubic-bezier(0.22, 1, 0.36, 1) ${index * 120}ms` }} />; }
+function PulseLegend({ item, reduced }) { const value = useCountUp(item.value, 900, reduced); return <span className="flex items-center gap-2 text-sm text-muted"><i className="h-2.5 w-2.5 rounded-sm" style={{ background: item.color }}/><b className="font-mono font-medium tabular-nums text-text">{Math.round(value)}</b>{item.label}</span>; }
+
 export default function Dashboard({
   onNavigate,
   onOpenTask,
@@ -124,6 +129,7 @@ export default function Dashboard({
   const [activityLoading, setActivityLoading] = useState(true);
   const [activityError, setActivityError] = useState("");
   const [decisionCount, setDecisionCount] = useState(0);
+  const [decisions, setDecisions] = useState([]);
   const [decisionsLoading, setDecisionsLoading] = useState(true);
   const [decisionsError, setDecisionsError] = useState("");
   const [overviewAttempt, setOverviewAttempt] = useState(0);
@@ -133,7 +139,7 @@ export default function Dashboard({
     async function load() {
       if (!workspaceId || !projectId) {
         setActivity([]); setActivityError(""); setActivityLoading(false);
-        setDecisionCount(0); setDecisionsError(""); setDecisionsLoading(false);
+        setDecisionCount(0); setDecisions([]); setDecisionsError(""); setDecisionsLoading(false);
         return;
       }
       setActivityLoading(true); setActivityError("");
@@ -147,7 +153,8 @@ export default function Dashboard({
       else { setActivity([]); setActivityError(activityResult.reason?.message || "Could not load recent activity."); }
       if (decisionResult.status === "fulfilled") {
         setDecisionCount(getDecisionCount(decisionResult.value));
-      } else { setDecisionCount(0); setDecisionsError(decisionResult.reason?.message || "Could not load decisions."); }
+        setDecisions(Array.isArray(decisionResult.value?.data) ? decisionResult.value.data : Array.isArray(decisionResult.value?.decisions) ? decisionResult.value.decisions : []);
+      } else { setDecisionCount(0); setDecisions([]); setDecisionsError(decisionResult.reason?.message || "Could not load decisions."); }
       setActivityLoading(false); setDecisionsLoading(false);
     }
     void load();
@@ -195,39 +202,6 @@ export default function Dashboard({
     };
   }, [workspaceId, projectId]);
 
-  const stats = useMemo(() => {
-    const completed = tasks.filter(isCompleted).length;
-    const inProgress = tasks.filter(isInProgress).length;
-    const open = tasks.length - completed;
-
-    return [
-      {
-        label: "Open tasks",
-        value: open,
-        detail: "Not yet completed",
-        icon: CircleDashed,
-      },
-      {
-        label: "In progress",
-        value: inProgress,
-        detail: "Currently being worked on",
-        icon: Clock3,
-      },
-      {
-        label: "Completed",
-        value: completed,
-        detail: "Tasks finished",
-        icon: CheckCircle2,
-      },
-      {
-        label: "Decisions logged",
-        value: decisionCount,
-        detail: decisionsError ? "Decision count unavailable" : "Recorded for this project",
-        icon: GitMerge,
-      },
-    ];
-  }, [tasks, decisionCount, decisionsError]);
-
   const recentTasks = useMemo(() => {
     return [...tasks]
       .sort((a, b) => {
@@ -240,6 +214,13 @@ export default function Dashboard({
 
   const hasProject = Boolean(workspaceId && projectId);
   const activityState = getActivityState({ loading: activityLoading, error: activityError, items: activity });
+  const completed = tasks.filter(isCompleted).length;
+  const inProgress = tasks.filter(isInProgress).length;
+  const open = Math.max(0, tasks.length - completed - inProgress);
+  const completion = tasks.length ? Math.round(completed / tasks.length * 100) : 0;
+  const pipeline = [{ label: "Open", value: open, color: "#8fb4ff" }, { label: "In progress", value: inProgress, color: "#f0a640", shimmer: true }, { label: "Done", value: completed, color: "#5cd6bd" }];
+  const reducedMotion = useReducedMotion();
+  const latestDecision = decisions[0];
 
   return (
     <div className="mx-auto w-full max-w-7xl space-y-8 pb-8">
@@ -324,49 +305,8 @@ export default function Dashboard({
         </section>
       )}
 
-      {/* Real task statistics */}
-      {hasProject && (
-        <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          {stats.map((stat) => {
-            const Icon = stat.icon;
-
-            return (
-              <div
-                key={stat.label}
-                className="rounded-xl border border-line bg-surface p-5"
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <p className="text-sm font-medium text-muted">
-                    {stat.label}
-                  </p>
-
-                  <Icon
-                    size={18}
-                    strokeWidth={1.8}
-                    className="text-muted"
-                  />
-                </div>
-
-                <p className="mt-5 font-mono text-3xl font-medium tracking-tight text-text">
-                  {(stat.label === "Decisions logged" ? decisionsLoading : loadingTasks) ? (
-                    <LoaderCircle
-                      size={25}
-                      className="animate-spin text-muted"
-                    />
-                  ) : (
-                    stat.label === "Decisions logged"
-                      ? decisionsError ? "!" : decisionCount
-                      : taskError ? "!" : stat.value
-                  )}
-                </p>
-
-                <p className="mt-2 text-xs text-muted">{stat.label === "Decisions logged" && decisionsError ? "Decision count unavailable" : taskError && stat.label !== "Decisions logged" ? "Task data unavailable" : stat.detail}</p>
-                {((stat.label === "Decisions logged" && decisionsError) || (stat.label !== "Decisions logged" && taskError)) && <button type="button" onClick={() => setOverviewAttempt((attempt) => attempt + 1)} className="mt-2 text-xs font-medium text-acc hover:underline">Retry</button>}
-              </div>
-            );
-          })}
-        </section>
-      )}
+      {/* Project pulse */}
+      {hasProject && <section className="rounded-[20px] border border-line bg-surface p-5 sm:p-7"><div className="grid gap-7 lg:grid-cols-[136px_minmax(0,1fr)_minmax(230px,.7fr)] lg:items-center"><ProgressRing percent={completion} /><div className="min-w-0"><p className="text-base font-semibold text-text">Project pulse</p><p className="mt-1 truncate text-sm text-muted">{open} Open tasks · {inProgress} In progress · {completed} Completed</p><div className="dashboard-motion mt-5 flex h-3 gap-[3px] overflow-hidden rounded-md bg-hover">{pipeline.map((item, index) => <PulseSegment key={item.label} item={item} total={tasks.length} index={index} reduced={reducedMotion} />)}</div><div className="mt-4 flex flex-wrap gap-x-5 gap-y-2">{pipeline.map((item) => <PulseLegend key={item.label} item={item} reduced={reducedMotion} />)}</div></div><button type="button" onClick={() => onNavigate?.("decisions")} className="min-h-32 rounded-[14px] border border-line bg-hover p-4 text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc"><div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[.08em] text-muted"><GitMerge size={15} className="text-acc"/>Decisions logged <span className="ml-auto font-mono text-text">{decisionsLoading ? "…" : decisionsError ? "!" : decisionCount}</span></div><p className="mt-4 truncate text-sm font-semibold text-text">{latestDecision?.title || "No decisions logged yet"}</p><span className="mt-3 inline-block text-sm font-semibold text-acc">Review decisions</span></button></div></section>}
 
       {/* Main content */}
       {hasProject && (

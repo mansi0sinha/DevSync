@@ -1,7 +1,7 @@
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import ThemeToggle from "../ui/ThemeToggle";
-import { Search, PanelLeft, Menu } from "lucide-react";
+import { Search, PanelLeft, Menu, LogOut } from "lucide-react";
 import { getRealtimeStatus, subscribeRealtime, subscribeRealtimeStatus } from "../../services/realtime";
 import NotificationPanel from "./NotificationPanel";
 
@@ -15,9 +15,11 @@ const pageTitles = {
   search: "Search",
 };
 
-export default function Header({ activePage = "dashboard", onNavigate, onOpenNotification, onToggleNavigation, mobileNavOpen = false, mobileNavToggleRef }) {
+export default function Header({ activePage = "dashboard", onNavigate, onOpenNotification, onToggleNavigation, mobileNavOpen = false, mobileNavToggleRef, user, onLogout }) {
   const [realtimeStatus, setRealtimeStatus] = useState(getRealtimeStatus());
   const [onlineCount, setOnlineCount] = useState(0);
+  const [accountOpen, setAccountOpen] = useState(false);
+  const accountRef = useRef(null);
 
   useEffect(() => {
     const unsubscribeStatus = subscribeRealtimeStatus((nextStatus) => {
@@ -31,6 +33,13 @@ export default function Header({ activePage = "dashboard", onNavigate, onOpenNot
       unsubscribeStatus();
       unsubscribePresence();
     };
+  }, []);
+
+  useEffect(() => {
+    function closeAccount(event) { if (!accountRef.current?.contains(event.target)) setAccountOpen(false); }
+    function closeOnEscape(event) { if (event.key === "Escape") setAccountOpen(false); }
+    document.addEventListener("mousedown", closeAccount); document.addEventListener("keydown", closeOnEscape);
+    return () => { document.removeEventListener("mousedown", closeAccount); document.removeEventListener("keydown", closeOnEscape); };
   }, []);
 
   const connectionLabel = realtimeStatus === "connected"
@@ -86,12 +95,9 @@ export default function Header({ activePage = "dashboard", onNavigate, onOpenNot
         <ThemeToggle />
 
         {/* User avatar */}
-        <div
-          className="flex h-8 w-8 items-center justify-center rounded-full border border-line bg-hover text-xs font-semibold text-text"
-          title="Your account"
-          aria-label="Your account"
-        >
-          U
+        <div className="relative" ref={accountRef}>
+          <button type="button" onClick={() => setAccountOpen((open) => !open)} aria-label="Open account menu" aria-expanded={accountOpen} className="flex h-9 w-9 items-center justify-center rounded-full border border-line bg-hover text-xs font-semibold text-text outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc" title="Your account">{(user?.name || user?.email || "U").slice(0, 1).toUpperCase()}</button>
+          {accountOpen && <div className="absolute right-0 top-full z-50 mt-2 w-56 rounded-xl border border-line bg-surface p-2 shadow-lg"><div className="border-b border-line px-3 py-2"><p className="truncate text-sm font-semibold text-text">{user?.name || "Your account"}</p><p className="mt-0.5 truncate text-xs text-muted">{user?.email}</p></div><button type="button" onClick={onLogout} className="mt-1 flex min-h-11 w-full items-center gap-2 rounded-lg px-3 text-sm text-muted hover:bg-hover hover:text-text focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc"><LogOut size={16}/>Log out</button></div>}
         </div>
       </div>
     </header>
