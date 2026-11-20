@@ -17,6 +17,7 @@ import Register from "./pages/Register";
 import { WorkspaceDialog, WorkspaceOnboarding } from "./components/workspaces/WorkspaceDialogs";
 import ThemeToggle from "./components/ui/ThemeToggle";
 import { connectRealtime, disconnectRealtime } from "./services/realtime";
+import { LoaderCircle } from "lucide-react";
 
 import {
   authAPI,
@@ -39,6 +40,21 @@ const protectedPages = [
   "activity",
   "search",
 ];
+
+function LoadingScreen({ label, detail }) {
+  return (
+    <main className="relative flex min-h-screen items-center justify-center bg-bg px-5 text-text">
+      <ThemeToggle className="absolute right-4 top-4" />
+      <section className="flex w-full max-w-xs flex-col items-center rounded-2xl border border-line bg-surface px-6 py-8 text-center">
+        <div className="dashboard-motion flex h-11 w-11 items-center justify-center rounded-xl border border-acc/30 bg-accSoft text-acc">
+          <LoaderCircle size={22} strokeWidth={2} className="animate-spin" aria-hidden="true" />
+        </div>
+        <h1 className="mt-4 text-lg font-semibold tracking-tight text-text">{label}</h1>
+        <p className="mt-1.5 text-sm leading-6 text-muted">{detail}</p>
+      </section>
+    </main>
+  );
+}
 
 const publicPages = ["home", "login", "register"];
 const validPages = [...protectedPages, ...publicPages, "not-found"];
@@ -539,17 +555,12 @@ function App() {
       case "search":
         return <Search key={`${workspaceId}:${projectId}`} workspaceId={workspaceId} projectId={projectId} onOpenTask={openTaskContext} onOpenDecision={openDecisionContext} onOpenDiscussion={openDiscussionContext} />;
       default:
-        return <Dashboard onNavigate={navigate} />;
+        return <Dashboard key={`${workspaceId}:${projectId}`} onNavigate={navigate} onOpenTask={openTaskContext} onOpenDecision={openDecisionContext} onOpenDiscussion={openDiscussionContext} workspaceId={workspaceId} projectId={projectId} />;
     }
   }
 
   if (checkingSession) {
-    return (
-      <div className="relative flex min-h-screen items-center justify-center bg-bg text-sm text-muted">
-        <ThemeToggle className="absolute right-4 top-4" />
-        <span>Checking your session...</span>
-      </div>
-    );
+    return <LoadingScreen label="Checking your session" detail="Securing your workspace access." />;
   }
 
   if (!user || publicPages.includes(activePage) || activePage === "not-found") {
@@ -557,7 +568,7 @@ function App() {
   }
 
   if (loadingWorkspaces) {
-    return <div className="relative flex min-h-screen items-center justify-center bg-bg text-sm text-muted"><ThemeToggle className="absolute right-4 top-4" />Loading your workspaces...</div>;
+    return <LoadingScreen label="Loading your workspaces" detail="Preparing your projects and team space." />;
   }
 
   if (workspaceError && workspaces.length === 0) {
@@ -615,7 +626,7 @@ function App() {
                 value={workspaceId}
                 onChange={(event) => { setWorkspaceId(event.target.value); setProjectId(""); setProjectError(""); navigate("dashboard"); }}
                 disabled={loadingWorkspaces || workspaces.length === 0}
-                className="theme-select max-w-[220px] border-r border-line bg-transparent px-3 text-sm text-text outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-acc"
+                className="theme-select max-w-[220px] bg-transparent px-3 text-sm text-text outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-acc"
               >
                 <option value="">
                   {loadingWorkspaces ? "Loading workspaces..." : "Select workspace"}
@@ -630,11 +641,13 @@ function App() {
               <button
                 type="button"
                 onClick={() => setDialogType("createWorkspace")}
-                className="border-r border-line px-3 text-sm font-medium text-text hover:bg-hover focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-acc"
+                className="border-l border-acc/40 bg-acc px-3 text-sm font-semibold text-[#05211b] hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-acc"
               >
                 + Workspace
               </button>
-              <button type="button" onClick={() => setDialogType("join")} className="px-3 text-sm font-medium text-text hover:bg-hover focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-acc">Join</button></div></div>
+              </div></div>
+
+              <button type="button" onClick={() => setDialogType("join")} className="min-h-11 rounded-xl border border-acc/35 bg-accSoft px-3 text-sm font-semibold text-acc hover:bg-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc">Join</button>
 
               <div><p className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">Project</p><div className="flex min-h-11 overflow-hidden rounded-xl border border-line bg-surface">
               <label className="sr-only" htmlFor="project-select">

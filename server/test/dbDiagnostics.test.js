@@ -9,6 +9,7 @@ test("Mongo connection failures receive safe diagnostics by common category", ()
   assert.match(diagnoseMongoError(Object.assign(new Error("TLS handshake"), { code: "ERR_TLS_CERT_ALTNAME_INVALID" })), /TLS negotiation failed/);
   assert.match(diagnoseMongoError(Object.assign(new Error("Authentication failed"), { code: 18 })), /authentication failed/);
   assert.match(diagnoseMongoError(Object.assign(new Error("Server selection timed out"), { name: "MongoServerSelectionError" })), /cluster is unavailable/);
+  assert.match(diagnoseMongoError(Object.assign(new Error("Mongoose connection failed"), { name: "MongooseServerSelectionError" })), /cluster is unavailable/);
   const diagnostic = diagnoseMongoError(new Error("mongodb+srv://user:secret@private.example/db?retryWrites=true"));
   assert.doesNotMatch(diagnostic, /private\.example|secret|mongodb\+srv/i);
   assert.match(diagnoseMongoError(new Error("Operation users.findOne() buffering timed out after 10000ms")), /temporarily unavailable/);
@@ -17,6 +18,7 @@ test("Mongo connection failures receive safe diagnostics by common category", ()
 test("transient MongoDB errors are classified as unavailable without exposing error text", () => {
   assert.equal(isDatabaseUnavailableError(Object.assign(new Error("connection reset"), { code: "ECONNRESET" })), true);
   assert.equal(isDatabaseUnavailableError(Object.assign(new Error("server selection timed out"), { name: "MongoServerSelectionError" })), true);
+  assert.equal(isDatabaseUnavailableError(Object.assign(new Error("Mongoose connection failed"), { name: "MongooseServerSelectionError" })), true);
   assert.equal(isDatabaseUnavailableError(new Error("Operation users.findOne() buffering timed out after 10000ms")), true);
   assert.equal(isDatabaseUnavailableError(new Error("A normal application validation error")), false);
 });

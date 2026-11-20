@@ -13,6 +13,7 @@ import {
   Link2,
   ExternalLink,
   GitPullRequest,
+  Columns3,
 } from "lucide-react";
 
 import Button from "../components/ui/Button";
@@ -900,7 +901,8 @@ export default function Board({ workspaceId, projectId, workspace, project, onOp
             {workspace?.name || "Workspace"} / {project?.name || "Project"}
           </p>
 
-          <h1 className="text-2xl font-semibold tracking-tight text-text sm:text-3xl">
+          <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight text-text">
+            <Columns3 size={22} strokeWidth={1.8} className="text-acc" aria-hidden="true" />
             Task Board
           </h1>
 

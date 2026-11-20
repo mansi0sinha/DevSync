@@ -1,7 +1,9 @@
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   GitMerge,
+  GitBranch,
+  Layers,
   Search,
   Plus,
   ArrowUpRight,
@@ -96,11 +98,8 @@ function normalizeDecision(decision, discussions = [], tasks = []) {
 }
 
 function useReducedMotion() { const [reduced, setReduced] = useState(() => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false); useEffect(() => { const query = window.matchMedia?.("(prefers-reduced-motion: reduce)"); if (!query) return undefined; const update = () => setReduced(query.matches); query.addEventListener("change", update); return () => query.removeEventListener("change", update); }, []); return reduced; }
-function useCountUp(target, reduced, key) { const [value, setValue] = useState(0); const prior = useRef(0); useEffect(() => { const from = prior.current; prior.current = target; if (reduced) { setValue(target); return undefined; } const start = performance.now(); let frame; const tick = (now) => { const t = Math.min(1, (now - start) / 900); setValue(from + (target - from) * (1 - (1 - t) ** 3)); if (t < 1) frame = requestAnimationFrame(tick); }; frame = requestAnimationFrame(tick); return () => cancelAnimationFrame(frame); }, [target, reduced, key]); return value; }
-function Sheets({ count }) { const sheets = Math.max(1, Math.min(count, 3)); return <svg className="decision-sheets" viewBox="0 0 100 84" aria-hidden="true">{Array.from({ length: sheets }, (_, index) => { const back = sheets - index - 1; return <g key={index} className={`decision-sheet decision-sheet-${index}`} transform={`translate(${19 + back * 7} ${10 + back * 5}) rotate(${-13 + back * 7} 32 28)`}><rect width="58" height="62" rx="4" fill="var(--surface)" stroke="var(--insight)" strokeDasharray={count ? undefined : "4 3"}/>{index === sheets - 1 && count > 0 && <><rect x="9" y="10" width="27" height="5" rx="2" fill="var(--insight)"/><path d="M9 25h35M9 33h27" stroke="var(--faint)" strokeWidth="2" strokeLinecap="round"/><circle cx="46" cy="47" r="7" fill="var(--insight)"/><path d="m42.5 47 2.3 2.3 4.2-4.7" fill="none" stroke="var(--surface)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></>}</g>; })}</svg>; }
-function CoverageRing({ percent }) { const reduced = useReducedMotion(); const arc = useCountUp(percent, reduced, percent); const circumference = 2 * Math.PI * 35; return <svg className="decision-coverage" viewBox="0 0 88 88" aria-hidden="true"><circle cx="44" cy="44" r="35" fill="none" stroke="var(--hover)" strokeWidth="9"/><circle cx="44" cy="44" r="35" fill="none" stroke="#f0a640" strokeWidth="9" strokeLinecap="round" strokeDasharray={circumference} strokeDashoffset={circumference * (1 - arc / 100)} transform="rotate(-90 44 44)"/><text x="44" y="49" textAnchor="middle" fill="var(--text)" className="font-mono text-[15px]">{Math.round(arc)}%</text></svg>; }
-function TaskConnector({ linked }) { return <svg className={`decision-connector ${linked ? "is-linked" : ""}`} viewBox="0 0 112 58" aria-hidden="true"><path d="M33 29h46" stroke="var(--insight)" strokeWidth="2" strokeDasharray={linked ? undefined : "5 4"}/>{linked && <circle className="connector-dot" cx="33" cy="29" r="3" fill="var(--insight)"/>}<rect x="3" y="7" width="30" height="44" rx="8" fill="var(--surface)" stroke="var(--insight)"/><path d="M11 20h14M11 27h10" stroke="var(--insight)" strokeWidth="1.5" strokeLinecap="round"/><rect x="79" y="7" width="30" height="44" rx="8" fill={linked ? "var(--insight-soft)" : "var(--surface)"} stroke="var(--insight)" strokeWidth="1.5" strokeDasharray={linked ? undefined : "4 3"}/><path d="M87 20h14M87 27h10" stroke="var(--insight)" strokeWidth="1.5" strokeLinecap="round"/></svg>; }
-function InsightCard({ kind, label, value, unit, hint, progress, children, animationKey }) { const reduced = useReducedMotion(); const count = useCountUp(value, reduced, animationKey); return <article className={`decision-insight decision-insight--${kind}`}><div className="flex items-start justify-between gap-4"><p className="flex items-center gap-2 text-[13px] font-medium text-muted"><i className="h-2 w-2 rounded-full bg-[var(--insight)]"/>{label}</p><div className="decision-illustration">{children}</div></div><div className="mt-2"><p className="font-mono text-[56px] font-semibold leading-none tracking-[-.03em] tabular-nums text-text">{count}</p><p className="mt-1 text-[13px] text-muted">{unit}</p></div><div className="mt-auto pt-5"><div className="h-1.5 overflow-hidden rounded-sm bg-hover"><div className="decision-insight-bar h-full rounded-sm bg-[var(--insight)]" style={{ width: `${progress}%`, transition: reduced ? "none" : "width 1.1s cubic-bezier(0.22, 1, 0.36, 1)" }}/></div><p className="mt-3 truncate text-[13px] text-muted">{hint}</p></div></article>; }
+function useCountUp(target, reduced, key) { const [value, setValue] = useState(0); useEffect(() => { let frame; if (reduced) { frame = requestAnimationFrame(() => setValue(target)); return () => cancelAnimationFrame(frame); } const start = performance.now(); const tick = (now) => { const t = Math.min(1, (now - start) / 600); setValue(target * (1 - (1 - t) ** 3)); if (t < 1) frame = requestAnimationFrame(tick); }; frame = requestAnimationFrame(tick); return () => cancelAnimationFrame(frame); }, [target, reduced, key]); return value; }
+function DecisionStatChip({ Icon, value, label, iconClassName, delay }) { const reduced = useReducedMotion(); const count = useCountUp(value, reduced, value); const isZero = value === 0; return <span className="decision-stat-chip inline-flex h-9 shrink-0 items-center rounded-full border border-line bg-surface px-3.5 text-sm hover:border-muted" style={{ animationDelay: `${delay}ms` }}><Icon aria-hidden="true" size={16} strokeWidth={1.9} className={iconClassName} /><span className={`ml-2 font-bold tabular-nums ${isZero ? "text-muted" : "text-text"}`}>{Math.round(count)}</span><span className="ml-1 text-muted">{label}</span></span>; }
 
 function DecisionModal({ onClose, onCreate, tasks, projectName }) {
   const [title, setTitle] = useState("");
@@ -349,9 +348,13 @@ export default function Decisions({ workspaceId, projectId, workspace, project, 
     setPageError("");
 
     try {
-      const [decisionResponse, discussionResponse] = await Promise.all([
+      const [decisionResponse, discussionResponse, taskResult] = await Promise.all([
         isTrashView ? decisionAPI.getTrash(workspaceId, projectId) : decisionAPI.getAll(workspaceId, projectId),
         discussionAPI.getAll(workspaceId, projectId),
+        taskAPI.getAll(workspaceId, projectId).then(
+          (response) => ({ response }),
+          (error) => ({ error })
+        ),
       ]);
 
       let savedRecords = getResponseData(decisionResponse);
@@ -371,18 +374,15 @@ export default function Decisions({ workspaceId, projectId, workspace, project, 
         throw new Error("The server returned an unexpected decisions response.");
       }
 
-      // Load tasks separately so a task-loading issue doesn't break the Decision Log.
+      // Keep a task-loading issue from breaking the Decision Log.
       let availableTasks = [];
-
-      try {
-        const taskResponse = await taskAPI.getAll(workspaceId, projectId);
-        const taskRecords = getResponseData(taskResponse);
-
+      if (taskResult.response) {
+        const taskRecords = getResponseData(taskResult.response);
         if (Array.isArray(taskRecords)) {
           availableTasks = taskRecords;
         }
-      } catch (taskError) {
-        console.error("Could not load tasks for the Decision Log:", taskError);
+      } else {
+        console.error("Could not load tasks for the Decision Log:", taskResult.error);
       }
 
       setTasks(availableTasks);
@@ -463,6 +463,14 @@ export default function Decisions({ workspaceId, projectId, workspace, project, 
       return matchesSearch && matchesProject;
     });
   }, [decisions, search, projectFilter]);
+
+  const decisionStats = useMemo(() => ({
+    decisions: decisions.length,
+    projects: new Set(decisions.map((decision) => decision.project)).size,
+    linkedTasks: decisions.filter(
+      (decision) => decision.linkedTaskId || decision.taskId.trim()
+    ).length,
+  }), [decisions]);
 
   const selectedDecision =
     filteredDecisions.find(
@@ -659,7 +667,8 @@ export default function Decisions({ workspaceId, projectId, workspace, project, 
         <div>
           <p className="mb-2 text-sm text-muted">{workspace?.name || "Workspace"} / {project?.name || "Project"}</p>
 
-          <h1 className="text-2xl font-semibold tracking-tight text-text sm:text-3xl">
+          <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight text-text">
+            <GitMerge size={22} strokeWidth={1.8} className="text-acc" aria-hidden="true" />
             Decision Log
           </h1>
 
@@ -693,34 +702,20 @@ export default function Decisions({ workspaceId, projectId, workspace, project, 
       )}
 
       {/* Summary */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <div className="rounded-xl border border-line bg-surface p-4">
-          <p className="text-sm text-muted">Recorded decisions</p>
-          <p className="mt-3 font-mono text-2xl text-text">
-            {loading ? "—" : decisions.length}
-          </p>
-        </div>
-
-        <div className="rounded-xl border border-line bg-surface p-4">
-          <p className="text-sm text-muted">Projects covered</p>
-          <p className="mt-3 font-mono text-2xl text-text">
-            {loading
-              ? "—"
-              : new Set(decisions.map((decision) => decision.project)).size}
-          </p>
-        </div>
-
-        <div className="rounded-xl border border-line bg-surface p-4">
-          <p className="text-sm text-muted">Linked to tasks</p>
-          <p className="mt-3 font-mono text-2xl text-text">
-            {loading
-              ? "—"
-              : decisions.filter(
-                  (decision) =>
-                    decision.linkedTaskId || decision.taskId.trim()
-                ).length}
-          </p>
-        </div>
+      <div className="my-4 flex min-h-9 flex-wrap items-center gap-2">
+        {loading ? (
+          <>
+            <span className="h-9 w-32 animate-pulse rounded-full border border-line bg-surface" />
+            <span className="h-9 w-40 animate-pulse rounded-full border border-line bg-surface" />
+            <span className="h-9 w-36 animate-pulse rounded-full border border-line bg-surface" />
+          </>
+        ) : (
+          <>
+            <DecisionStatChip Icon={GitBranch} value={decisionStats.decisions} label={decisionStats.decisions === 1 ? "decision" : "decisions"} iconClassName="text-[#2a5bc0] dark:text-[#8fb4ff]" delay={0} />
+            <DecisionStatChip Icon={Layers} value={decisionStats.projects} label={decisionStats.projects === 1 ? "project covered" : "projects covered"} iconClassName="text-[#8a5a00] dark:text-[#f0a640]" delay={60} />
+            <DecisionStatChip Icon={Link2} value={decisionStats.linkedTasks} label={decisionStats.linkedTasks === 1 ? "linked to task" : "linked to tasks"} iconClassName="text-[#0b7a68] dark:text-[#5cd6bd]" delay={120} />
+          </>
+        )}
       </div>
 
       {/* Search and filters */}

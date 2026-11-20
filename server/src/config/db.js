@@ -52,7 +52,11 @@ function diagnoseMongoError(error) {
   if (/buffering timed out/i.test(safeMessage)) {
     return "MongoDB was temporarily unavailable while the request was waiting for the connection to recover. Retry after the database reconnects.";
   }
-  if (error?.name === "MongoServerSelectionError" || /server selection timed out|ReplicaSetNoPrimary|querySrv|topology was destroyed|connection pool was cleared/i.test(safeMessage)) {
+  // Mongoose wraps the driver's MongoServerSelectionError as
+  // MongooseServerSelectionError. Treat both forms identically; otherwise a
+  // DNS/network failure hidden in the server descriptions is reported as an
+  // unclassified error during application startup.
+  if (["MongoServerSelectionError", "MongooseServerSelectionError"].includes(error?.name) || /server selection timed out|ReplicaSetNoPrimary|querySrv|topology was destroyed|connection pool was cleared/i.test(safeMessage)) {
     return "MongoDB cluster is unavailable or cannot be reached. Check cluster status, DNS, and network access.";
   }
   if (!process.env.MONGODB_URI) return "MongoDB is not configured. Set MONGODB_URI in the server environment.";
@@ -62,7 +66,7 @@ function diagnoseMongoError(error) {
 function isDatabaseUnavailableError(error) {
   const code = String(findErrorCode(error));
   if (NETWORK_ERROR_CODES.has(code)) return true;
-  if (["MongoServerSelectionError", "MongoNetworkError", "MongoNetworkTimeoutError"].includes(error?.name)) return true;
+  if (["MongoServerSelectionError", "MongooseServerSelectionError", "MongoNetworkError", "MongoNetworkTimeoutError"].includes(error?.name)) return true;
   const message = String(error?.message || "");
   return /buffering timed out|server selection timed out|topology was destroyed|connection pool was cleared|connection reset|connection refused|network timeout/i.test(message);
 }

@@ -972,7 +972,8 @@ export default function Discussion({ workspaceId, projectId, workspace, project,
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
         <div>
           <p className="mb-2 text-sm text-muted">{workspace?.name || "Workspace"} / {project?.name || "Project"}</p>
-          <h1 className="text-2xl font-semibold tracking-tight text-text sm:text-3xl">
+          <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight text-text">
+            <MessageSquare size={22} strokeWidth={1.8} className="text-acc" aria-hidden="true" />
             Discussion
           </h1>
           <p className="mt-2 text-sm text-muted">

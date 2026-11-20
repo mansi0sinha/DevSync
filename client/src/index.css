@@ -111,6 +111,10 @@ body,
   animation-duration: 0s !important;
 }
 
+@keyframes decision-stat-fade-in { from { opacity: 0; } to { opacity: 1; } }
+.decision-stat-chip { animation: decision-stat-fade-in 250ms ease-out both !important; }
+@media (prefers-reduced-motion: reduce) { .decision-stat-chip { animation: none !important; } }
+
 @keyframes devsync-pulse-shimmer { to { transform: translateX(230%); } }
 .pulse-segment { position: relative; min-width: 0; transform-origin: left; border-radius: 6px; transition-property: width; }
 .pulse-segment:hover { filter: brightness(1.08); }
