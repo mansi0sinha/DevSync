@@ -609,86 +609,11 @@ function App() {
       />
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <Header activePage={activePage} onNavigate={navigate} onOpenNotification={openNotification} onToggleNavigation={() => setMobileNavOpen((open) => !open)} mobileNavOpen={mobileNavOpen} mobileNavToggleRef={mobileNavToggleRef} user={user} onLogout={handleLogout} />
+        <Header activePage={activePage} onNavigate={navigate} onOpenNotification={openNotification} onToggleNavigation={() => setMobileNavOpen((open) => !open)} mobileNavOpen={mobileNavOpen} mobileNavToggleRef={mobileNavToggleRef} user={user} onLogout={handleLogout} workspaceName={selectedWorkspace?.name} projectName={projects.find((item) => getItemId(item) === projectId)?.name} canInviteMembers={isAdmin} onInviteMembers={() => setDialogType("invite")} onJoinWorkspace={() => setDialogType("join")} />
 
         <main
           className="min-h-0 min-w-0 flex-1 overflow-y-auto p-3 sm:p-6"
         >
-          <div className="mb-6 flex flex-wrap items-end gap-4">
-            <div className="flex flex-wrap items-end gap-5">
-              <div><p className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">Workspace</p><div className="flex min-h-11 overflow-hidden rounded-xl border border-line bg-surface">
-              <label className="sr-only" htmlFor="workspace-select">
-                Select workspace
-              </label>
-
-              <select
-                id="workspace-select"
-                value={workspaceId}
-                onChange={(event) => { setWorkspaceId(event.target.value); setProjectId(""); setProjectError(""); navigate("dashboard"); }}
-                disabled={loadingWorkspaces || workspaces.length === 0}
-                className="theme-select max-w-[220px] bg-transparent px-3 text-sm text-text outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-acc"
-              >
-                <option value="">
-                  {loadingWorkspaces ? "Loading workspaces..." : "Select workspace"}
-                </option>
-                {workspaces.map((workspace) => (
-                  <option key={getItemId(workspace)} value={getItemId(workspace)}>
-                    {workspace.name}
-                  </option>
-                ))}
-              </select>
-
-              <button
-                type="button"
-                onClick={() => setDialogType("createWorkspace")}
-                className="border-l border-acc/40 bg-acc px-3 text-sm font-semibold text-[#05211b] hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-acc"
-              >
-                + Workspace
-              </button>
-              </div></div>
-
-              <button type="button" onClick={() => setDialogType("join")} className="min-h-11 rounded-xl border border-acc/35 bg-accSoft px-3 text-sm font-semibold text-acc hover:bg-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc">Join</button>
-
-              <div><p className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">Project</p><div className="flex min-h-11 overflow-hidden rounded-xl border border-line bg-surface">
-              <label className="sr-only" htmlFor="project-select">
-                Select project
-              </label>
-
-              <select
-                id="project-select"
-                value={projectId}
-                onChange={(event) => { setProjectId(event.target.value); navigate("dashboard"); }}
-                disabled={!workspaceId || loadingProjects || projects.length === 0}
-                className="theme-select max-w-[220px] bg-transparent px-3 text-sm text-text outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-acc"
-              >
-                <option value="">
-                  {!workspaceId
-                    ? "Select a workspace first"
-                    : loadingProjects
-                      ? "Loading projects..."
-                      : "Select project"}
-                </option>
-                {projects.map((project) => (
-                  <option key={getItemId(project)} value={getItemId(project)}>
-                    {project.name}
-                  </option>
-                ))}
-              </select>
-
-              <button
-                type="button"
-                onClick={() => setDialogType("createProject")}
-                disabled={!workspaceId}
-                className="border-l border-acc/40 bg-acc px-3 text-sm font-semibold text-[#05211b] hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                + Project
-              </button>
-              </div></div>
-              {isAdmin && <button type="button" onClick={() => setDialogType("invite")} className="min-h-11 rounded-xl border border-acc/35 bg-accSoft px-3 text-sm font-semibold text-acc hover:bg-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc">Invite Members</button>}
-            </div>
-
-          </div>
-
           {(workspaceError || projectError) && (
             <div
               role="alert"

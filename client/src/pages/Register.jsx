@@ -1,7 +1,17 @@
 import { useState } from "react";
-import { ArrowLeft, ArrowRight, Eye, EyeOff, LoaderCircle, LockKeyhole, Mail, UserRound } from "lucide-react";
+import { ArrowRight, Eye, EyeOff, LoaderCircle, LockKeyhole, Mail, UserRound } from "lucide-react";
 import { authAPI, saveSession } from "../services/api";
-import ThemeToggle from "../components/ui/ThemeToggle";
+import AuthLayout, { RegisterPreviewCards } from "../components/auth/AuthLayout";
+
+function PasswordStrength({ password }) {
+  const checks = [password.length >= 8, /[a-z]/.test(password) && /[A-Z]/.test(password), /\d/.test(password), /[^A-Za-z0-9]/.test(password)];
+  const score = checks.filter(Boolean).length;
+  const label = score >= 4 ? "Strong" : score >= 2 ? "Medium" : "Weak";
+  return <div className="auth-v2-strength" aria-live="polite" aria-label={`Password strength: ${label}`}>
+    <div>{checks.map((filled, index) => <i className={filled ? "is-filled" : ""} key={index} />)}</div>
+    <span>{label}</span>
+  </div>;
+}
 
 export default function Register({ onNavigate, onLogin }) {
   const [form, setForm] = useState({ name: "", email: "", password: "", confirmPassword: "" });
@@ -44,26 +54,20 @@ export default function Register({ onNavigate, onLogin }) {
     } finally { setLoading(false); }
   }
 
-  return <main className="public-page public-auth-page">
-    <div className="public-auth-grid" aria-hidden="true"/>
-    <div className="public-auth-wrap public-reveal">
-      <div className="public-auth-topbar"><a href="/" onClick={(event) => { event.preventDefault(); onNavigate?.("home"); }} className="public-auth-back"><ArrowLeft size={15}/> Back to DevSync</a><ThemeToggle className="public-theme-toggle"/></div>
-      <section className="public-auth-card public-register-card">
-        <a href="/" onClick={(event) => { event.preventDefault(); onNavigate?.("home"); }} className="public-auth-brand"><img className="public-mark-light" src="/devsync-mark-light.svg" alt=""/><img className="public-mark-dark" src="/devsync-mark-dark.svg" alt=""/><span>DevSync</span></a>
-        <p className="public-eyebrow">GET YOUR TEAM ON THE SAME PAGE</p>
-        <h1>Create your account.</h1>
-        <p className="public-auth-description">Start connecting your project’s conversations to its work.</p>
-        {error && <div role="alert" className="public-auth-error">{error}</div>}
-        <form onSubmit={handleSubmit} className="public-auth-form">
-          <div className="public-field"><label htmlFor="register-name">Full name</label><div className={`public-input-wrap ${fieldErrors.name ? "has-error" : ""}`}><UserRound size={17} aria-hidden="true"/><input id="register-name" name="name" type="text" autoComplete="name" placeholder="Your name" value={form.name} onChange={handleChange} minLength={2} maxLength={100} required aria-invalid={Boolean(fieldErrors.name)} aria-describedby={fieldErrors.name ? "register-name-error" : undefined}/></div>{fieldErrors.name && <p id="register-name-error" role="alert" className="public-field-error">{fieldErrors.name}</p>}</div>
-          <div className="public-field"><label htmlFor="register-email">Email address</label><div className={`public-input-wrap ${fieldErrors.email ? "has-error" : ""}`}><Mail size={17} aria-hidden="true"/><input id="register-email" name="email" type="email" autoComplete="email" placeholder="you@example.com" value={form.email} onChange={handleChange} required aria-invalid={Boolean(fieldErrors.email)} aria-describedby={fieldErrors.email ? "register-email-error" : undefined}/></div>{fieldErrors.email && <p id="register-email-error" role="alert" className="public-field-error">{fieldErrors.email}</p>}</div>
-          <div className="public-field"><label htmlFor="register-password">Password</label><div className={`public-input-wrap ${fieldErrors.password ? "has-error" : ""}`}><LockKeyhole size={17} aria-hidden="true"/><input id="register-password" name="password" type={showPassword ? "text" : "password"} autoComplete="new-password" placeholder="At least 8 characters" value={form.password} onChange={handleChange} minLength={8} required aria-invalid={Boolean(fieldErrors.password)} aria-describedby={fieldErrors.password ? "register-password-error" : undefined}/><button type="button" className="public-password-toggle" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? "Hide password" : "Show password"}>{showPassword ? <EyeOff size={17}/> : <Eye size={17}/>}</button></div>{fieldErrors.password && <p id="register-password-error" role="alert" className="public-field-error">{fieldErrors.password}</p>}</div>
-          <div className="public-field"><label htmlFor="register-confirm-password">Confirm password</label><div className={`public-input-wrap ${fieldErrors.confirmPassword ? "has-error" : ""}`}><LockKeyhole size={17} aria-hidden="true"/><input id="register-confirm-password" name="confirmPassword" type={showPassword ? "text" : "password"} autoComplete="new-password" placeholder="Re-enter your password" value={form.confirmPassword} onChange={handleChange} required aria-invalid={Boolean(fieldErrors.confirmPassword)} aria-describedby={fieldErrors.confirmPassword ? "register-confirm-password-error" : undefined}/></div>{fieldErrors.confirmPassword && <p id="register-confirm-password-error" role="alert" className="public-field-error">{fieldErrors.confirmPassword}</p>}</div>
-          <button className="public-button public-auth-submit" type="submit" disabled={loading}>{loading ? <LoaderCircle size={17} className="public-spinner"/> : null}{loading ? "Creating account…" : "Create account"}{!loading && <ArrowRight size={16}/>}</button>
-        </form>
-        <p className="public-auth-switch">Already have an account? <button type="button" onClick={() => onNavigate?.("login")}>Sign in</button></p>
-      </section>
-      <p className="public-auth-footnote">No demos or sample workspaces. Start with your own team.</p>
+  return <AuthLayout onNavigate={onNavigate} eyebrow="GET YOUR TEAM ON THE SAME PAGE" headline={<>Every decision, tied to <em>the work it creates.</em></>} leftCards={<RegisterPreviewCards />}>
+    <div className="auth-v2-form public-reveal">
+      <p className="auth-v2-form-eyebrow">CREATE YOUR ACCOUNT</p>
+      <h1>Join your team&apos;s workspace</h1>
+      <p className="auth-v2-description">Start connecting your project&apos;s conversations to its work.</p>
+      {error && <div role="alert" className="public-auth-error">{error}</div>}
+      <form onSubmit={handleSubmit} className="public-auth-form auth-v2-form-fields">
+        <div className="public-field"><label htmlFor="register-name">Full name</label><div className={`public-input-wrap ${fieldErrors.name ? "has-error" : ""}`}><UserRound size={17} aria-hidden="true"/><input id="register-name" name="name" type="text" autoComplete="name" placeholder="Your name" value={form.name} onChange={handleChange} minLength={2} maxLength={100} required aria-invalid={Boolean(fieldErrors.name)} aria-describedby={fieldErrors.name ? "register-name-error" : undefined}/></div>{fieldErrors.name && <p id="register-name-error" role="alert" className="public-field-error">{fieldErrors.name}</p>}</div>
+        <div className="public-field"><label htmlFor="register-email">Email address</label><div className={`public-input-wrap ${fieldErrors.email ? "has-error" : ""}`}><Mail size={17} aria-hidden="true"/><input id="register-email" name="email" type="email" autoComplete="email" placeholder="you@example.com" value={form.email} onChange={handleChange} required aria-invalid={Boolean(fieldErrors.email)} aria-describedby={fieldErrors.email ? "register-email-error" : undefined}/></div>{fieldErrors.email && <p id="register-email-error" role="alert" className="public-field-error">{fieldErrors.email}</p>}</div>
+        <div className="public-field"><label htmlFor="register-password">Password</label><div className={`public-input-wrap ${fieldErrors.password ? "has-error" : ""}`}><LockKeyhole size={17} aria-hidden="true"/><input id="register-password" name="password" type={showPassword ? "text" : "password"} autoComplete="new-password" placeholder="At least 8 characters" value={form.password} onChange={handleChange} minLength={8} required aria-invalid={Boolean(fieldErrors.password)} aria-describedby={fieldErrors.password ? "register-password-error" : undefined}/><button type="button" className="public-password-toggle" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? "Hide password" : "Show password"}>{showPassword ? <EyeOff size={17}/> : <Eye size={17}/>}</button></div>{fieldErrors.password && <p id="register-password-error" role="alert" className="public-field-error">{fieldErrors.password}</p>}<PasswordStrength password={form.password} /></div>
+        <div className="public-field"><label htmlFor="register-confirm-password">Confirm password</label><div className={`public-input-wrap ${fieldErrors.confirmPassword ? "has-error" : ""}`}><LockKeyhole size={17} aria-hidden="true"/><input id="register-confirm-password" name="confirmPassword" type={showPassword ? "text" : "password"} autoComplete="new-password" placeholder="Re-enter your password" value={form.confirmPassword} onChange={handleChange} required aria-invalid={Boolean(fieldErrors.confirmPassword)} aria-describedby={fieldErrors.confirmPassword ? "register-confirm-password-error" : undefined}/></div>{fieldErrors.confirmPassword && <p id="register-confirm-password-error" role="alert" className="public-field-error">{fieldErrors.confirmPassword}</p>}</div>
+        <button className="public-button public-auth-submit" type="submit" disabled={loading}>{loading ? <LoaderCircle size={17} className="public-spinner"/> : null}{loading ? "Creating account…" : "Create account"}{!loading && <ArrowRight size={16}/>}</button>
+      </form>
+      <p className="public-auth-switch">Already have an account? <button type="button" onClick={() => onNavigate?.("login")}>Sign in</button></p>
     </div>
-  </main>;
+  </AuthLayout>;
 }

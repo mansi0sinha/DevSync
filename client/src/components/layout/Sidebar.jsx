@@ -135,7 +135,9 @@ export default function Sidebar({
           <option value="" disabled>{workspace?.name || "Select workspace"}</option>
           {workspaces.map((item) => <option key={item._id || item.id} value={item._id || item.id}>{item.name}</option>)}
         </select>
-        {!isCollapsed && <button type="button" onClick={onCreateWorkspace} className="mt-2 w-full rounded-lg px-2 py-1 text-left text-xs font-medium text-muted hover:bg-hover hover:text-text">+ Add workspace</button>}
+        {!isCollapsed ? <button type="button" onClick={onCreateWorkspace} className="mt-2 w-full rounded-lg px-2 py-1 text-left text-xs font-medium text-muted hover:bg-hover hover:text-text">+ Add workspace</button> : <div className="mt-2 flex flex-col gap-1">
+          <button type="button" aria-label="Add workspace" title="Add workspace" onClick={onCreateWorkspace} className="flex h-8 w-full items-center justify-center rounded-lg text-muted hover:bg-hover hover:text-text"><Plus size={16} /></button>
+        </div>}
       </div>
 
       {/* Scrollable navigation */}
@@ -237,15 +239,10 @@ export default function Sidebar({
               </div>}
             </>
           ) : (
-            <button
-              type="button"
-              aria-label={projects.length ? "Projects" : "Create project"}
-              title="Add project"
-              onClick={projects.length ? () => navigateAndClose("dashboard") : () => { onMobileClose?.(); onCreateProject?.(); }}
-              className="flex h-10 w-full items-center justify-center rounded-lg text-muted transition-colors hover:bg-hover hover:text-text"
-            >
-              <Plus size={18} strokeWidth={1.8} />
-            </button>
+            <div className="flex flex-col gap-1">
+              {projects.length > 0 && <button type="button" aria-label="Projects" title="Projects" onClick={() => navigateAndClose("dashboard")} className="flex h-10 w-full items-center justify-center rounded-lg text-muted transition-colors hover:bg-hover hover:text-text"><Columns3 size={18} strokeWidth={1.8} /></button>}
+              <button type="button" aria-label="Add project" title="Add project" onClick={() => { onMobileClose?.(); onCreateProject?.(); }} className="flex h-10 w-full items-center justify-center rounded-lg text-muted transition-colors hover:bg-hover hover:text-text"><Plus size={18} strokeWidth={1.8} /></button>
+            </div>
           )}
         </div>
       </div>

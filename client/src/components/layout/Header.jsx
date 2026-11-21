@@ -1,7 +1,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import ThemeToggle from "../ui/ThemeToggle";
-import { Search, PanelLeft, Menu, LogOut } from "lucide-react";
+import { Search, PanelLeft, Menu, LogOut, UserPlus, Link2 } from "lucide-react";
 import { getRealtimeStatus, subscribeRealtime, subscribeRealtimeStatus } from "../../services/realtime";
 import NotificationPanel from "./NotificationPanel";
 
@@ -15,7 +15,7 @@ const pageTitles = {
   search: "Search",
 };
 
-export default function Header({ activePage = "dashboard", onNavigate, onOpenNotification, onToggleNavigation, mobileNavOpen = false, mobileNavToggleRef, user, onLogout }) {
+export default function Header({ activePage = "dashboard", onNavigate, onOpenNotification, onToggleNavigation, mobileNavOpen = false, mobileNavToggleRef, user, onLogout, workspaceName, projectName, canInviteMembers = false, onInviteMembers, onJoinWorkspace }) {
   const [realtimeStatus, setRealtimeStatus] = useState(getRealtimeStatus());
   const [onlineCount, setOnlineCount] = useState(0);
   const [accountOpen, setAccountOpen] = useState(false);
@@ -43,13 +43,13 @@ export default function Header({ activePage = "dashboard", onNavigate, onOpenNot
   }, []);
 
   const connectionLabel = realtimeStatus === "connected"
-    ? `Connected${onlineCount ? ` · ${onlineCount} online` : ""}`
+    ? `${onlineCount || 0} connected`
     : realtimeStatus === "reconnecting" ? "Reconnecting" : "Disconnected";
 
   return (
-    <header className="flex h-16 shrink-0 items-center justify-between border-b border-line bg-surface px-3 sm:px-6">
+    <header className="app-header">
       {/* Current page */}
-      <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+      <div className="app-header-title">
         <button ref={mobileNavToggleRef} id="mobile-navigation-toggle" type="button" onClick={onToggleNavigation} aria-label={mobileNavOpen ? "Close navigation menu" : "Open navigation menu"} aria-expanded={mobileNavOpen} aria-controls="primary-sidebar" className="inline-flex shrink-0 rounded-md p-2 text-muted hover:bg-hover hover:text-text md:hidden"><Menu size={20}/></button>
         <PanelLeft
           size={18}
@@ -60,8 +60,13 @@ export default function Header({ activePage = "dashboard", onNavigate, onOpenNot
         <div className="hidden h-5 w-px bg-line md:block" />
 
         <div className="flex min-w-0 items-center gap-2 text-sm">
-          <span className="hidden text-muted md:inline">Workspace</span>
-          <span className="hidden text-muted md:inline">/</span>
+          <span className="hidden max-w-36 truncate text-muted xl:inline">{workspaceName || "Workspace"}</span>
+          <span className="hidden text-muted xl:inline">/</span>
+
+          {projectName && <>
+            <span className="hidden max-w-40 truncate text-text xl:inline">{projectName}</span>
+            <span className="hidden text-muted xl:inline">/</span>
+          </>}
 
           <span className="truncate font-semibold text-text">
             {pageTitles[activePage] || "Overview"}
@@ -69,12 +74,18 @@ export default function Header({ activePage = "dashboard", onNavigate, onOpenNot
         </div>
       </div>
 
-      {/* Header actions */}
-      <div className="flex shrink-0 items-center gap-2 sm:gap-4">
-        <div className="inline-flex items-center gap-1.5 text-[11px] text-muted" role="status" aria-live="polite" title={`Realtime ${connectionLabel}`}>
-          <span className={`h-2 w-2 rounded-full ${realtimeStatus === "connected" ? "bg-acc" : realtimeStatus === "reconnecting" ? "bg-amb" : "bg-muted"}`} />
-          <span className="hidden sm:inline">{connectionLabel}</span>
-        </div>
+      <div className="app-header-workspace-actions">
+        <button type="button" onClick={onJoinWorkspace} aria-label="Join workspace" title="Join workspace" className="app-header-action app-header-join"><Link2 size={16} /><span>Join</span></button>
+        {canInviteMembers && <button type="button" onClick={onInviteMembers} aria-label="Invite Members" title="Invite Members" className="app-header-action app-header-invite"><UserPlus size={16} /><span>Invite</span></button>}
+      </div>
+
+      <div className="app-header-status" role="status" aria-live="polite" title={`Realtime ${connectionLabel}`}>
+        <span className={`h-2 w-2 rounded-full ${realtimeStatus === "connected" ? "bg-acc" : realtimeStatus === "reconnecting" ? "bg-amb" : "bg-muted"}`} />
+        <span>{connectionLabel}</span>
+      </div>
+
+      {/* Header utilities */}
+      <div className="app-header-utilities">
         {/* Search */}
         <button
           type="button"

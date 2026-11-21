@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ArrowRight, Building2, Link2, Mail, X } from "lucide-react";
+import { ArrowRight, Building2, Check, Link2, Mail, X } from "lucide-react";
 import Button from "../ui/Button";
 import ThemeToggle from "../ui/ThemeToggle";
 
@@ -17,6 +17,8 @@ export function WorkspaceOnboarding({ user, onCreateWorkspace, onJoinWorkspace, 
   const [token, setToken] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const displayName = user?.name || user?.email || "there";
+  const initial = displayName.trim().charAt(0).toUpperCase() || "U";
 
   async function submit(event) {
     event.preventDefault();
@@ -33,56 +35,78 @@ export function WorkspaceOnboarding({ user, onCreateWorkspace, onJoinWorkspace, 
   }
 
   return (
-    <main className="relative flex min-h-screen items-center justify-center bg-bg px-5 py-10 text-text">
-      <ThemeToggle className="absolute right-4 top-4" />
-      <section className="w-full max-w-3xl rounded-2xl border border-line bg-surface p-6 shadow-sm sm:p-9">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <p className="text-sm text-muted">Signed in as {user?.name || user?.email}</p>
-            <h1 className="mt-2 text-2xl font-semibold tracking-tight">Set up your workspace</h1>
-            <p className="mt-2 max-w-xl text-sm leading-6 text-muted">Create a workspace for your team or join one using an invitation token from its administrator.</p>
-          </div>
-          <button type="button" onClick={onLogout} className="rounded-lg border border-line px-3 py-2 text-sm font-medium text-muted hover:bg-hover hover:text-text">Log out</button>
+    <main className="workspace-onboarding">
+      <div className="workspace-decoration workspace-decoration-top" aria-hidden="true" />
+      <div className="workspace-decoration workspace-decoration-bottom" aria-hidden="true" />
+      <header className="workspace-topbar">
+        <div className="workspace-wordmark" aria-label="DevSync">
+          <img className="public-mark-light" src="/devsync-mark-light.svg" alt="" />
+          <img className="public-mark-dark" src="/devsync-mark-dark.svg" alt="" />
+          <span>DevSync</span>
         </div>
-
-        <div className="mt-7 grid gap-4 sm:grid-cols-2">
-          <button type="button" onClick={() => { setMode("create"); setError(""); }} className={`rounded-xl border p-5 text-left transition-colors ${mode === "create" ? "border-acc bg-accSoft" : "border-line bg-bg hover:bg-hover"}`}>
-            <Building2 size={20} className="text-acc" />
-            <h2 className="mt-3 font-semibold">Create Workspace</h2>
-            <p className="mt-1 text-sm text-muted">Start a new team space. You will be its Admin.</p>
-          </button>
-          <button type="button" onClick={() => { setMode("join"); setError(""); }} className={`rounded-xl border p-5 text-left transition-colors ${mode === "join" ? "border-acc bg-accSoft" : "border-line bg-bg hover:bg-hover"}`}>
-            <Link2 size={20} className="text-acc" />
-            <h2 className="mt-3 font-semibold">Join Workspace</h2>
-            <p className="mt-1 text-sm text-muted">Accept a valid invitation addressed to your account.</p>
-          </button>
+        <div className="workspace-account">
+          <span className="workspace-avatar" aria-hidden="true">{initial}</span>
+          <span className="workspace-signed-in">Signed in as {displayName}</span>
+          <button type="button" onClick={onLogout} className="workspace-logout">Log out</button>
+          <ThemeToggle className="workspace-theme-toggle" />
         </div>
+      </header>
 
-        {mode && (
-          <form onSubmit={submit} className="mt-5 space-y-4 rounded-xl border border-line bg-bg p-5">
+      <section className="workspace-onboarding-content">
+        <p className="workspace-step"><span className="workspace-step-light">STEP 1 OF 2 · WORKSPACE</span><span className="workspace-step-dark">Step 1 of 2</span></p>
+        <h1>Welcome, {displayName}. Let&apos;s set up your workspace</h1>
+        <p className="workspace-intro">Create a workspace for your team, or join one with an invitation token.</p>
+
+        <div className="workspace-choice-grid">
+          <article className={`workspace-choice workspace-choice-primary ${mode === "create" ? "is-selected" : ""} ${mode === "join" ? "is-inactive" : ""}`}>
             {mode === "create" ? (
-              <>
+              <form onSubmit={submit} className="workspace-create-form">
+                <div className="workspace-create-heading">
+                  <span className="workspace-choice-icon workspace-create-icon"><Building2 size={24} aria-hidden="true" /></span>
+                  <span><strong>Create Workspace</strong><small>Set up a new team space</small></span>
+                </div>
                 <div>
-                  <label htmlFor="onboarding-workspace-name" className="mb-1.5 block text-sm font-medium">Workspace name</label>
+                  <label htmlFor="onboarding-workspace-name">Workspace name</label>
                   <input id="onboarding-workspace-name" className={fieldClass} value={name} onChange={(event) => setName(event.target.value)} minLength={2} maxLength={80} required autoFocus />
                 </div>
                 <div>
-                  <label htmlFor="onboarding-workspace-description" className="mb-1.5 block text-sm font-medium">Description <span className="font-normal text-muted">(optional)</span></label>
-                  <textarea id="onboarding-workspace-description" className={fieldClass} value={description} onChange={(event) => setDescription(event.target.value)} maxLength={500} rows={3} />
+                  <label htmlFor="onboarding-workspace-description">Description <span>(optional)</span></label>
+                  <textarea id="onboarding-workspace-description" className={fieldClass} value={description} onChange={(event) => setDescription(event.target.value)} maxLength={500} rows={2} />
                 </div>
-              </>
+                <ErrorMessage>{error}</ErrorMessage>
+                <Button type="submit" loading={busy} disabled={busy} className="workspace-submit-button">Create workspace <ArrowRight size={16} /></Button>
+              </form>
             ) : (
-              <div>
-                <label htmlFor="workspace-invitation-token" className="mb-1.5 block text-sm font-medium">Invitation token</label>
-                <input id="workspace-invitation-token" className={fieldClass} value={token} onChange={(event) => setToken(event.target.value)} minLength={32} maxLength={200} autoComplete="off" required autoFocus />
-              </div>
+              <button type="button" aria-pressed={false} onClick={() => { setMode("create"); setError(""); }} className="workspace-create-select">
+                <span className="workspace-choice-icon workspace-create-icon"><Building2 size={26} aria-hidden="true" /></span>
+                <span className="workspace-choice-title">Create Workspace</span>
+                <span className="workspace-choice-description">Start a new team space. You will be its Admin.</span>
+                <span className="workspace-check-row"><Check size={17} aria-hidden="true" />Invite teammates</span>
+                <span className="workspace-check-row"><Check size={17} aria-hidden="true" />Create projects and tasks</span>
+                <span className="workspace-card-cta">Create workspace <ArrowRight size={17} aria-hidden="true" /></span>
+              </button>
             )}
-            <ErrorMessage>{error}</ErrorMessage>
-            <Button type="submit" loading={busy} disabled={busy}>
-              {mode === "create" ? "Create workspace" : "Join workspace"} <ArrowRight size={15} />
-            </Button>
-          </form>
-        )}
+          </article>
+
+          <article className={`workspace-choice workspace-choice-secondary ${mode === "join" ? "is-selected" : ""}`}>
+            <button type="button" aria-pressed={mode === "join"} onClick={() => { setMode("join"); setError(""); }} className="workspace-join-select">
+              <span className="workspace-choice-icon workspace-join-icon"><Link2 size={25} aria-hidden="true" /></span>
+              <span className="workspace-choice-title">Join Workspace</span>
+              <span className="workspace-choice-description">Accept a valid invitation addressed to your account.</span>
+            </button>
+            {mode === "join" ? (
+              <form onSubmit={submit} className="workspace-join-form">
+                <input aria-label="Invitation token" id="workspace-invitation-token" className="workspace-token-input" placeholder="Paste invitation token" value={token} onChange={(event) => setToken(event.target.value)} minLength={32} maxLength={200} autoComplete="off" required autoFocus />
+                <button type="submit" className="workspace-join-button" disabled={busy}>{busy ? "Joining…" : "Join"}</button>
+                <ErrorMessage>{error}</ErrorMessage>
+              </form>
+            ) : (
+              <button type="button" onClick={() => { setMode("join"); setError(""); }} className="workspace-join-prompt">Enter invitation token <ArrowRight size={16} aria-hidden="true" /></button>
+            )}
+          </article>
+        </div>
+
+        <p className="workspace-footnote">Not sure? You can create or join more workspaces anytime.</p>
       </section>
     </main>
   );

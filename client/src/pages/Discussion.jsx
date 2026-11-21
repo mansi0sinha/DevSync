@@ -99,10 +99,21 @@ function normalizeThread(thread) {
   };
 }
 
-function Avatar({ initials, small = false }) {
+const avatarTones = [
+  "bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-200",
+  "bg-violet-100 text-violet-800 dark:bg-violet-950 dark:text-violet-200",
+  "bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200",
+  "bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-200",
+  "bg-teal-100 text-teal-800 dark:bg-teal-950 dark:text-teal-200",
+  "bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-200",
+];
+
+function Avatar({ initials, author = "", small = false }) {
+  const tone = [...author].reduce((hash, character) => (hash * 31 + character.charCodeAt(0)) >>> 0, 0) % avatarTones.length;
   return (
     <div
-      className={`flex shrink-0 items-center justify-center rounded-full border border-line bg-hover font-mono font-medium text-text ${
+      aria-hidden="true"
+      className={`flex shrink-0 items-center justify-center rounded-full border border-line font-sans font-semibold ${avatarTones[tone]} ${
         small ? "h-8 w-8 text-[10px]" : "h-9 w-9 text-xs"
       }`}
     >
@@ -1118,13 +1129,8 @@ export default function Discussion({ workspaceId, projectId, workspace, project,
                       </>
                     )}
 
-                    <span
-                      className={`rounded-md border px-2 py-1 text-[10px] font-medium ${
-                        activeThread.status === "Resolved"
-                          ? "border-acc/30 bg-accSoft text-acc"
-                          : "border-line bg-hover text-muted"
-                      }`}
-                    >
+                    <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium ${activeThread.status === "Open" ? "border-acc/25 bg-accSoft text-acc" : "border-line bg-hover text-muted"}`}>
+                      <span aria-hidden="true" className={`h-1.5 w-1.5 rounded-full ${activeThread.status === "Open" ? "bg-acc" : "bg-muted"}`} />
                       {activeThread.status}
                     </span>
                   </div>
@@ -1163,26 +1169,29 @@ export default function Discussion({ workspaceId, projectId, workspace, project,
                     </span>
                   </div>
 
-                  {activeThread.messages.map((item) => (
-                    <div
+                  {activeThread.messages.map((item, index) => {
+                    const previousItem = activeThread.messages[index - 1];
+                    const previousTime = previousItem?.createdAt ? new Date(previousItem.createdAt).getTime() : NaN;
+                    const currentTime = item.createdAt ? new Date(item.createdAt).getTime() : NaN;
+                    const withinGroupingWindow = Number.isFinite(previousTime) && Number.isFinite(currentTime)
+                      && currentTime >= previousTime && currentTime - previousTime <= 5 * 60 * 1000;
+                    const groupedWithPrevious = Boolean(previousItem && previousItem.author === item.author && withinGroupingWindow);
+
+                    return <div
                       key={item.id}
                       data-message-id={item.id}
-                      className={`mb-6 flex items-start gap-3 rounded-lg ${focusedMessageId === item.id ? "ring-2 ring-acc/50 ring-offset-4 ring-offset-surface" : ""}`}
+                      className={`${groupedWithPrevious ? "mb-3" : "mb-6"} flex items-start gap-3 rounded-lg ${focusedMessageId === item.id ? "ring-2 ring-acc/50 ring-offset-4 ring-offset-surface" : ""}`}
                     >
-                      <Avatar initials={item.initials} />
+                      {groupedWithPrevious ? <span aria-hidden="true" className="h-9 w-9 shrink-0" /> : <Avatar initials={item.initials} author={item.author} />}
 
                       <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <p className="text-sm font-semibold text-text">
-                            {item.author}
-                          </p>
-                          <span className="text-xs text-muted">
-                            {item.time}
-                          </span>
-                        </div>
+                        {!groupedWithPrevious && <div className="flex flex-wrap items-center gap-2">
+                          <p className="text-sm font-semibold text-text">{item.author}</p>
+                          <span className="text-xs text-muted">{item.time}</span>
+                        </div>}
 
                         {item.text && (
-                          <p className="mt-2 whitespace-pre-wrap wrap-break-word text-sm leading-6 text-text">
+                          <p className="mt-2 whitespace-pre-wrap wrap-break-word text-[15px] leading-6 text-text">
                             {item.text}
                           </p>
                         )}
@@ -1194,7 +1203,7 @@ export default function Discussion({ workspaceId, projectId, workspace, project,
                           onClick={() => recordedDecisions[`${activeThread.id}:${item.id}`]
                               ? onOpenDecision?.(recordedDecisions[`${activeThread.id}:${item.id}`].id)
                               : setRecordingMessage(item)}
-                            className="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-amb hover:underline"
+                            className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-acc/25 bg-accSoft px-2.5 py-1 text-xs font-medium text-acc hover:border-acc/50 hover:bg-accSoft"
                           >
                             <GitMerge size={13} />
                             {recordedDecisions[`${activeThread.id}:${item.id}`]
@@ -1212,8 +1221,8 @@ export default function Discussion({ workspaceId, projectId, workspace, project,
                       >
                         <MoreHorizontal size={17} />
                       </button>
-                    </div>
-                  ))}
+                    </div>;
+                  })}
 
                   {activeThread.decision && (
                     <div className="my-6 rounded-xl border border-amb/30 bg-ambSoft p-4">
