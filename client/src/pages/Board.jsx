@@ -19,19 +19,36 @@ import {
 import Button from "../components/ui/Button";
 import { getSavedUser, taskAPI, workspaceAPI } from "../services/api";
 import { subscribeRealtime } from "../services/realtime";
+import { priorityStyles, statusStyles } from "../constants/taskStyles";
 
 const columns = [
-  { id: "To do", title: "To Do" },
-  { id: "In progress", title: "In Progress" },
-  { id: "In review", title: "Review" },
-  { id: "Done", title: "Done" },
+  { id: "To do", title: "To do", style: statusStyles.todo },
+  { id: "In progress", title: "In progress", style: statusStyles.inProgress },
+  { id: "In review", title: "In review", style: statusStyles.inProgress },
+  { id: "Done", title: "Done", style: statusStyles.done },
 ];
 
-const priorityStyles = {
-  High: "border border-amb/30 bg-ambSoft text-amb",
-  Medium: "border border-line bg-hover text-muted",
-  Low: "border border-line bg-surface text-muted",
-};
+const avatarPalette = [
+  "border-purple-500/25 bg-purple-500/15 text-purple-700 dark:text-purple-300",
+  "border-teal-500/25 bg-teal-500/15 text-teal-700 dark:text-teal-300",
+  "border-rose-500/25 bg-rose-500/15 text-rose-700 dark:text-rose-300",
+  "border-blue-500/25 bg-blue-500/15 text-blue-700 dark:text-blue-300",
+  "border-pink-500/25 bg-pink-500/15 text-pink-700 dark:text-pink-300",
+];
+
+function getAvatarStyle(assignee) {
+  if (!assignee || typeof assignee !== "object") return "border-line bg-hover text-muted";
+  const key = String(assignee._id || assignee.id || assignee.name || assignee.email || "member");
+  const hash = [...key].reduce((value, character) => ((value * 31) + character.charCodeAt(0)) >>> 0, 0);
+  return avatarPalette[hash % avatarPalette.length];
+}
+
+function getInitials(assignee) {
+  if (!assignee || typeof assignee !== "object") return "—";
+  const name = assignee.name || assignee.email || "Workspace member";
+  const parts = name.trim().split(/[\s@._-]+/).filter(Boolean);
+  return (parts.length > 1 ? `${parts[0][0]}${parts[1][0]}` : parts[0].slice(0, 2)).toUpperCase();
+}
 
 function toDisplayStatus(status) {
   const statusMap = {
@@ -88,6 +105,21 @@ function formatDueDate(date) {
   });
 }
 
+function getDueDateState(date, status) {
+  if (!date || status === "Done") return "normal";
+  const parsed = typeof date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(date)
+    ? new Date(`${date}T00:00:00`)
+    : new Date(date);
+  if (Number.isNaN(parsed.getTime())) return "normal";
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  parsed.setHours(0, 0, 0, 0);
+  const days = Math.round((parsed.getTime() - today.getTime()) / 86400000);
+  if (days < 0) return "overdue";
+  if (days <= 3) return days === 0 ? "dueToday" : `dueIn${days}`;
+  return "normal";
+}
+
 function normalizeTask(task) {
   return {
     ...task,
@@ -124,19 +156,40 @@ function TaskCard({
   updating,
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const priorityStyle = priorityStyles[String(task.priority).toLowerCase()] || priorityStyles.medium;
+  const dueDateState = getDueDateState(task.dueDate, task.status);
+  const dueDateClass = dueDateState === "overdue"
+    ? "text-red-600 dark:text-red-300"
+    : dueDateState === "dueToday" || dueDateState.startsWith("dueIn")
+      ? "font-medium text-amber-700 dark:text-amber-300"
+      : "text-muted";
+  const dueDateLabel = dueDateState === "overdue"
+    ? `${formatDueDate(task.dueDate)} · overdue`
+    : dueDateState === "dueToday"
+      ? `${formatDueDate(task.dueDate)} · today`
+      : dueDateState.startsWith("dueIn")
+        ? `${formatDueDate(task.dueDate)} · in ${dueDateState.slice(5)} ${dueDateState === "dueIn1" ? "day" : "days"}`
+        : formatDueDate(task.dueDate);
 
   return (
     <article
       draggable={!deleting && !updating}
       onDragStart={(event) => onDragStart(event, task.id)}
-      className="cursor-grab rounded-xl border border-line bg-surface p-4 transition-colors hover:border-faint active:cursor-grabbing"
+      className="cursor-grab rounded-xl border border-line bg-surface p-4 shadow-card transition-all duration-200 hover:-translate-y-px hover:border-faint active:cursor-grabbing"
     >
-      <div className="flex items-start justify-between gap-2">
-        <span className="font-mono text-[11px] text-muted">
-          {task.id?.length > 12 ? task.id.slice(-6) : task.id}
-        </span>
-
-        <div className="relative">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] font-medium ${priorityStyle.border} ${priorityStyle.tint} ${priorityStyle.text}`}>
+            <span className={`h-1.5 w-1.5 rounded-full ${priorityStyle.dot}`} />
+            {task.priority}
+          </span>
+          {updating && <span className="truncate text-[11px] text-muted">Saving...</span>}
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          <span className="font-mono text-[10px] text-muted" title={task.id}>
+            {task.id?.length > 12 ? task.id.slice(-6) : task.id}
+          </span>
+          <div className="relative">
           <button
             type="button"
             aria-label={`Options for ${task.title}`}
@@ -149,7 +202,7 @@ function TaskCard({
           </button>
 
           {menuOpen && (
-            <div className="absolute right-0 top-8 z-20 w-44 rounded-lg border border-line bg-surface p-1 shadow-lg">
+            <div className="absolute right-0 top-8 z-20 w-44 rounded-lg border border-line bg-popover p-1 shadow-popover">
               <button
                 type="button"
                 onClick={() => {
@@ -213,32 +266,19 @@ function TaskCard({
               </button>
             </div>
           )}
+          </div>
         </div>
       </div>
 
-      <h3 className="mt-2 wrap-break-word text-sm font-semibold leading-5 text-text">
+      <h3 className="mt-3 wrap-break-word text-sm font-medium leading-5 text-text">
         {task.title}
       </h3>
 
-      <p className="mt-1.5 whitespace-pre-wrap wrap-break-word text-xs leading-5 text-muted">
+      <p className="mt-1.5 line-clamp-2 whitespace-pre-wrap wrap-break-word text-xs leading-5 text-muted">
         {task.description || "No description added."}
       </p>
 
       {task.pullRequests?.length > 0 && <div className="mt-3 space-y-1.5">{task.pullRequests.map((pullRequest) => <a key={pullRequest._id} href={pullRequest.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-xs text-acc hover:underline"><GitPullRequest size={14} /><span>{pullRequest.title || `${pullRequest.owner}/${pullRequest.repository} #${pullRequest.number}`}</span><span className="ml-auto text-[10px] text-muted">{pullRequest.state === "unknown" ? "Unverified · waiting for webhook" : pullRequest.state}</span></a>)}</div>}
-
-      <div className="mt-4 flex flex-wrap items-center gap-2">
-        <span
-          className={`rounded-md px-2 py-1 text-[11px] font-medium ${
-            priorityStyles[task.priority] || priorityStyles.Medium
-          }`}
-        >
-          {task.priority}
-        </span>
-
-        {updating && (
-          <span className="text-[11px] text-muted">Saving...</span>
-        )}
-      </div>
 
       <div className="mt-4 flex items-center justify-between gap-2 border-t border-line pt-3">
         <div className="flex flex-wrap items-center gap-3 text-muted">
@@ -247,17 +287,17 @@ function TaskCard({
             {task.comments.length}
           </button>
 
-          <span className="flex items-center gap-1 text-xs">
+          <span className={`flex items-center gap-1 text-xs ${dueDateClass}`}>
             <CalendarDays size={13} />
-            {formatDueDate(task.dueDate)}
+            {dueDateLabel}
           </span>
         </div>
 
         <div
           title={`Assigned to ${typeof task.assignee === "object" ? task.assignee?.name || "workspace member" : "Unassigned"}`}
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-line bg-hover font-mono text-[10px] font-medium text-text"
+          className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full border font-mono text-[10px] font-medium ${getAvatarStyle(task.assignee)}`}
         >
-          {typeof task.assignee === "object" ? task.assignee?.name?.slice(0, 2).toUpperCase() || "U" : "—"}
+          {getInitials(task.assignee)}
         </div>
       </div>
     </article>
@@ -985,23 +1025,17 @@ export default function Board({ workspaceId, projectId, workspace, project, onOp
                 key={column.id}
                 onDragOver={(event) => event.preventDefault()}
                 onDrop={(event) => handleDrop(event, column.id)}
-                className="min-w-0 rounded-xl border border-line bg-col p-3"
+                className={`min-w-0 rounded-xl border border-line p-3 ${column.style.column}`}
               >
                 <div className="mb-3 flex items-center justify-between px-1 py-1">
                   <div className="flex min-w-0 items-center gap-2">
-                    <span
-                      className={`h-2 w-2 shrink-0 rounded-full ${
-                        column.id === "Done" || column.id === "In progress"
-                          ? "bg-acc"
-                          : "bg-faint"
-                      }`}
-                    />
+                    <span className={`h-2 w-2 shrink-0 rounded-full ${column.style.dot}`} />
 
-                    <h2 className="text-sm font-semibold text-text">
+                    <h2 className="text-sm font-medium text-text">
                       {column.title}
                     </h2>
 
-                    <span className="font-mono text-xs text-muted">
+                    <span className="rounded-full border border-line bg-surface/80 px-2 py-0.5 font-mono text-[10px] text-muted">
                       {columnTasks.length}
                     </span>
                   </div>

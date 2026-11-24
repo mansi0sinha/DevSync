@@ -5,7 +5,7 @@ const variants = {
   primary:
     "bg-acc text-onAcc hover:opacity-90 border border-transparent",
   secondary:
-    "bg-surface text-text border border-line hover:bg-hover",
+    "bg-control text-text border border-line hover:bg-hover",
   ghost:
     "bg-transparent text-muted hover:bg-hover hover:text-text border border-transparent",
 };

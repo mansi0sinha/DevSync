@@ -27,12 +27,12 @@ export function RegisterPreviewCards() {
 
 export function LoginPreviewCards() {
   return <>
-    <article className="auth-preview-card">
+    <article className="auth-preview-card auth-preview-card-login">
       <small>RECENT ACTIVITY</small>
       <p className="auth-preview-row"><Check size={15} />Task moved to In Progress</p>
       <p className="auth-preview-row"><MessageSquareText size={15} />Decision recorded</p>
     </article>
-    <article className="auth-preview-card">
+    <article className="auth-preview-card auth-preview-card-login">
       <small>NEW NOTIFICATION</small>
       <p className="auth-preview-row auth-preview-notice"><FolderKanban size={18} />You were assigned a task</p>
       <span className="auth-preview-time"><Clock3 size={12} /> Just now</span>

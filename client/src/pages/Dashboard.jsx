@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 
 import Button from "../components/ui/Button";
+import { ActivityList } from "../components/ActivityItem";
 import { activityAPI, decisionAPI, taskAPI } from "../services/api";
 import { getActivityState, getDecisionCount } from "../services/dashboardData";
 
@@ -41,20 +42,23 @@ function StatusChip({ status }) {
     .trim();
 
   const styles = {
-    "in progress": "border border-acc/30 bg-accSoft text-acc",
-    "in-progress": "border border-acc/30 bg-accSoft text-acc",
+    "in progress": "border border-sky-500/35 bg-sky-500/15 text-sky-700 dark:text-sky-300",
+    "in-progress": "border border-sky-500/35 bg-sky-500/15 text-sky-700 dark:text-sky-300",
+    in_progress: "border border-sky-500/35 bg-sky-500/15 text-sky-700 dark:text-sky-300",
     "in review": "border border-line bg-hover text-muted",
     review: "border border-line bg-hover text-muted",
-    completed: "border border-line bg-hover text-muted",
-    done: "border border-line bg-hover text-muted",
-    todo: "border border-line bg-surface text-muted",
-    "to do": "border border-line bg-surface text-muted",
+    completed: "border border-emerald-500/35 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
+    complete: "border border-emerald-500/35 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
+    done: "border border-emerald-500/35 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
+    todo: "border border-amber-500/35 bg-amber-500/15 text-amber-700 dark:text-amber-300",
+    "to do": "border border-amber-500/35 bg-amber-500/15 text-amber-700 dark:text-amber-300",
+    "to-do": "border border-amber-500/35 bg-amber-500/15 text-amber-700 dark:text-amber-300",
     open: "border border-line bg-surface text-muted",
   };
 
   return (
     <span
-      className={`inline-flex whitespace-nowrap rounded-md px-2 py-1 text-xs font-medium ${
+      className={`inline-flex whitespace-nowrap rounded-md border px-2 py-1 text-xs font-medium ${
         styles[normalizedStatus] || styles["to do"]
       }`}
     >
@@ -91,19 +95,6 @@ function isInProgress(task) {
   return ["in progress", "in-progress", "in_progress"].includes(
     getTaskStatus(task)
   );
-}
-
-function relativeTime(value) {
-  const timestamp = new Date(value).getTime();
-  if (Number.isNaN(timestamp)) return "Time unavailable";
-  const seconds = Math.round((timestamp - Date.now()) / 1000);
-  const units = [[60, "second"], [60, "minute"], [24, "hour"], [7, "day"], [4.35, "week"], [12, "month"], [Infinity, "year"]];
-  let amount = seconds;
-  for (const [threshold, unit] of units) {
-    if (Math.abs(amount) < threshold) return new Intl.RelativeTimeFormat(undefined, { numeric: "auto" }).format(amount, unit);
-    amount = Math.round(amount / threshold);
-  }
-  return "Time unavailable";
 }
 
 function useReducedMotion() { const [reduced, setReduced] = useState(() => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false); useEffect(() => { const query = window.matchMedia?.("(prefers-reduced-motion: reduce)"); if (!query) return undefined; const update = () => setReduced(query.matches); query.addEventListener("change", update); return () => query.removeEventListener("change", update); }, []); return reduced; }
@@ -340,19 +331,32 @@ export default function Dashboard({
               <div className="divide-y divide-line">
                 {recentTasks.map((task, index) => {
                   const taskId = task?._id || task?.id || `task-${index}`;
+                  const completedTask = isCompleted(task);
+                  const inProgressTask = isInProgress(task);
+                  const markerClass = completedTask
+                    ? "border-emerald-500 bg-emerald-500/15"
+                    : inProgressTask
+                      ? "border-sky-500 bg-sky-500/15"
+                      : "border-line bg-transparent";
+                  const priority = String(task?.priority || "Normal priority").toLowerCase();
+                  const priorityClass = priority.includes("high")
+                    ? "bg-rose-500"
+                    : priority.includes("medium") || priority.includes("normal")
+                      ? "bg-amber-500"
+                      : "bg-slate-400";
 
                   return (
                     <div
                       key={taskId}
-                      className="flex flex-col gap-3 py-4 first:pt-1 last:pb-1 sm:flex-row sm:items-center"
+                      className="-mx-2 flex flex-col gap-3 rounded-lg px-2 py-4 transition-colors duration-200 hover:bg-white/5 first:pt-1 last:pb-1 sm:flex-row sm:items-center"
                     >
                       <div className="flex min-w-0 flex-1 items-start gap-3">
-                        <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border border-line">
-                          <span className="h-1.5 w-1.5 rounded-full bg-faint" />
+                        <div className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border ${markerClass}`}>
+                          <span className={`h-1.5 w-1.5 rounded-full ${completedTask ? "bg-emerald-500" : inProgressTask ? "bg-sky-500" : "bg-transparent"}`} />
                         </div>
 
                         <div className="min-w-0">
-                          <p className="text-sm font-medium text-text">
+                          <p className={`text-sm font-medium ${completedTask ? "text-muted line-through" : "text-text"}`}>
                             {task?.title || "Untitled task"}
                           </p>
 
@@ -361,7 +365,8 @@ export default function Dashboard({
                               {String(taskId).slice(-8)}
                             </span>
                             <span className="text-muted">·</span>
-                            <span className="text-xs text-muted">
+                            <span className="inline-flex items-center gap-1.5 text-xs text-muted">
+                              <span className={`h-1.5 w-1.5 rounded-full ${priorityClass}`} />
                               {task?.priority || "Normal priority"}
                             </span>
                           </div>
@@ -391,20 +396,16 @@ export default function Dashboard({
           <div className="min-w-0 rounded-xl border border-line bg-surface p-5">
             <SectionHeading
               title="Recent activity"
-              action="Discussion"
-              onAction={() => onNavigate?.("discussion")}
+              action="View all"
+              onAction={() => onNavigate?.("activity")}
             />
 
-            {!workspaceId || !projectId ? <EmptyState icon={MessageSquare} title="Select a project" description="Choose a project to see its recent activity." /> : activityState === "loading" ? <div role="status" className="flex items-center justify-center gap-2 py-10 text-sm text-muted"><LoaderCircle size={17} className="animate-spin" />Loading recent activity…</div> : activityState === "error" ? <div className="py-6 text-center"><p role="alert" className="text-sm text-red-600 dark:text-red-300">{activityError}</p><button type="button" onClick={() => setOverviewAttempt((attempt) => attempt + 1)} className="mt-2 text-sm font-medium text-acc hover:underline">Try again</button></div> : activityState === "empty" ? <EmptyState icon={MessageSquare} title="No recent activity yet" description="Task, discussion, decision, and pull request events for this project will appear here." /> : <div className="divide-y divide-line">{activity.map((item) => {
-              const type = item.entityType === "task" ? "Task" : item.entityType === "decision" ? "Decision" : "Discussion";
-              const open = () => {
-                if (!item.relatedAvailable) return;
-                if (item.entityType === "task") onOpenTask?.(String(item.entityId));
-                else if (item.entityType === "decision") onOpenDecision?.(String(item.entityId));
-                else if (item.entityType === "discussion") onOpenDiscussion?.(String(item.entityId));
-              };
-              return <article key={item._id} className="flex items-start gap-3 py-3 first:pt-1 last:pb-1"><span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-acc"/><div className="min-w-0 flex-1"><p className="text-sm leading-5 text-text"><span className="font-semibold">{item.actorType === "system" ? "GitHub" : item.actor?.name || "A member"}</span> {item.summary}</p><div className="mt-1 flex items-center gap-2 text-[11px] text-muted"><span>{type}</span><span aria-hidden="true">·</span><time dateTime={item.createdAt}>{relativeTime(item.createdAt)}</time></div></div>{item.relatedAvailable && <button type="button" onClick={open} className="shrink-0 rounded-md px-2 py-1 text-xs font-medium text-acc hover:bg-hover" aria-label={`Open ${type.toLowerCase()}: ${item.summary}`}>Open</button>}</article>;
-            })}</div>}
+            {!workspaceId || !projectId ? <EmptyState icon={MessageSquare} title="Select a project" description="Choose a project to see its recent activity." /> : activityState === "loading" ? <div role="status" className="flex items-center justify-center gap-2 py-10 text-sm text-muted"><LoaderCircle size={17} className="animate-spin" />Loading recent activity…</div> : activityState === "error" ? <div className="py-6 text-center"><p role="alert" className="text-sm text-red-600 dark:text-red-300">{activityError}</p><button type="button" onClick={() => setOverviewAttempt((attempt) => attempt + 1)} className="mt-2 text-sm font-medium text-acc hover:underline">Try again</button></div> : activityState === "empty" ? <EmptyState icon={MessageSquare} title="No recent activity yet" description="Task, discussion, decision, and pull request events for this project will appear here." /> : <ActivityList compact items={activity.slice(0, 5)} onOpen={(item) => {
+              if (!item.relatedAvailable) return;
+              if (item.entityType === "task") onOpenTask?.(String(item.entityId));
+              else if (item.entityType === "decision") onOpenDecision?.(String(item.entityId));
+              else if (item.entityType === "discussion") onOpenDiscussion?.(String(item.entityId));
+            }} />}
           </div>
         </section>
       )}
